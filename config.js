@@ -18,6 +18,7 @@ const COUNTRIES = {
     dialPrefix: '256',
     minWalletBalance: 5000,
     mapCenter: [0.3476, 32.5825], // Kampala
+    documentLabels: { national_id: 'National ID', driving_license: 'Driving Permit / Licence' },
     rates: {
       motorcycle: { base: 1000, perKm: 700 },
       car: { base: 2000, perKm: 1300 }
@@ -34,6 +35,7 @@ const COUNTRIES = {
     currency: 'ZMW',
     flag: '🇿🇲',
     dialPrefix: '260',
+    documentLabels: { national_id: 'National Registration Card (NRC)', driving_license: 'Driving Licence' },
     minWalletBalance: 50,
     mapCenter: [-15.3875, 28.3228], // Lusaka
     rates: {
@@ -50,6 +52,7 @@ const COUNTRIES = {
     currency: 'MWK',
     flag: '🇲🇼',
     dialPrefix: '265',
+    documentLabels: { national_id: 'National Identity Card', driving_license: 'Driving Licence' },
     minWalletBalance: 5000,
     mapCenter: [-13.9626, 33.7741], // Lilongwe
     rates: {
@@ -62,6 +65,7 @@ const COUNTRIES = {
     currency: 'BWP',
     flag: '🇧🇼',
     dialPrefix: '267',
+    documentLabels: { national_id: 'Omang (National ID)', driving_license: 'Driving Licence' },
     minWalletBalance: 50,
     mapCenter: [-24.6282, 25.9231], // Gaborone
     rates: {
@@ -80,6 +84,7 @@ const COUNTRIES = {
     currency: 'USD',
     flag: '🇿🇼',
     dialPrefix: '263',
+    documentLabels: { national_id: 'National Identity Card', driving_license: 'Driving Licence' },
     minWalletBalance: 2,
     mapCenter: [-17.8292, 31.0522], // Harare
     rates: {
@@ -103,7 +108,9 @@ function getCountry(code) {
 }
 function publicCountryList() {
   return ACTIVE_COUNTRIES.map(code => ({
-    code, name: COUNTRIES[code].name, currency: COUNTRIES[code].currency, flag: COUNTRIES[code].flag, mapCenter: COUNTRIES[code].mapCenter
+    code, name: COUNTRIES[code].name, currency: COUNTRIES[code].currency, flag: COUNTRIES[code].flag,
+    mapCenter: COUNTRIES[code].mapCenter, documentLabels: COUNTRIES[code].documentLabels,
+    minWalletBalance: COUNTRIES[code].minWalletBalance
   }));
 }
 // Includes countries that exist in config but aren't launched yet — used

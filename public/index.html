@@ -249,6 +249,13 @@
       <div id="driverRegisterForm">
         <h2>Become a driver</h2>
         <p class="sub">Your account is reviewed before you can see or bid on ride requests.</p>
+
+        <p class="sub" style="margin-bottom:6px;">Which country will you drive in?</p>
+        <div class="field-stack" style="margin-bottom:12px;">
+          <div class="field"><select id="regCountry" style="border:none;outline:none;font-size:14.5px;flex:1;font-family:inherit;background:transparent;width:100%;padding:2px 0;"><option value="">Loading countries…</option></select></div>
+        </div>
+        <p class="suggested-fare" id="regCountryNote" style="margin:-6px 0 12px;"></p>
+
         <div class="field-stack" style="margin-bottom:10px;">
           <div class="field"><input id="regFullName" placeholder="Full name"></div>
           <div class="field"><input id="regPhone" placeholder="Phone number" type="tel"></div>
@@ -263,8 +270,8 @@
 
         <p class="sub" style="margin-bottom:6px;">Which ID are you using?</p>
         <div class="doctype-row">
-          <label class="doctype-box checked"><input type="radio" name="docType" value="national_id" checked> National ID</label>
-          <label class="doctype-box"><input type="radio" name="docType" value="driving_license"> Driving Permit / Licence</label>
+          <label class="doctype-box checked"><input type="radio" name="docType" value="national_id" checked><span id="docTypeNationalLabel">National ID</span></label>
+          <label class="doctype-box"><input type="radio" name="docType" value="driving_license"><span id="docTypeLicenseLabel">Driving Permit / Licence</span></label>
         </div>
 
         <div class="field-stack" style="margin-bottom:10px;">
@@ -434,34 +441,53 @@ function identify(){ socket.emit('identify', { role, name: myName, token: role==
 // GPS-based country detection: silently falls back to Uganda if location
 // is denied, unavailable, or the detected country isn't launched yet —
 // never blocks the app from working.
+let countryConfigCache = null;
+async function getCountryConfig(){
+  if (countryConfigCache) return countryConfigCache;
+  try{ countryConfigCache = await (await fetch('/api/config/countries')).json(); }
+  catch(e){ countryConfigCache = { allCountries: [] }; }
+  return countryConfigCache;
+}
+
+// Reverse-geocodes a coordinate to a country, and reports whether it's an
+// active (launched) country in our system. Shared by both the initial
+// device-location guess and the pickup-point-based detection.
+async function resolveCountryForCoords(lat, lng){
+  try{
+    const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=3`, { headers:{'Accept-Language':'en'} });
+    const geoData = await geoRes.json();
+    const detected = (geoData.address?.country_code || '').toUpperCase();
+    if (!detected) return null;
+    const cfg = await getCountryConfig();
+    return cfg.allCountries.find(c=>c.code===detected) || null;
+  }catch(e){ return null; }
+}
+
+function applyCountry(match){
+  if (!match || match.code === myCountry) return;
+  myCountry = match.code;
+  currentCurrency = match.currency;
+  document.querySelectorAll('.cur').forEach(el=>el.textContent = currentCurrency);
+  identify(); // re-sync the server session — matching, fare rates, and driver rooms all key off this
+}
+
+// Used only once, on first load, before the rider has chosen a pickup
+// point — a reasonable starting guess for map center and currency. The
+// moment a real pickup point is set (see setPickup), THAT takes over as
+// the source of truth instead, since a rider can be arranging a trip for
+// somewhere they aren't physically standing.
 async function detectCountryFromGPS(){
   if (!navigator.geolocation) return;
   navigator.geolocation.getCurrentPosition(async (pos)=>{
-    try{
-      const { latitude, longitude } = pos.coords;
-      const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=3`, { headers:{'Accept-Language':'en'} });
-      const geoData = await geoRes.json();
-      const detected = (geoData.address?.country_code || '').toUpperCase();
-      if (!detected) return;
-
-      const cfgRes = await fetch('/api/config/countries');
-      const cfg = await cfgRes.json();
-      const match = cfg.allCountries.find(c=>c.code===detected);
-      if (!match) return; // country we don't know at all — stay on default
-
-      if (!match.active){
-        toast(`GoFair isn't available in ${match.name} yet — showing Uganda for now`);
-        return;
-      }
-      if (match.code !== myCountry){
-        myCountry = match.code;
-        currentCurrency = match.currency;
-        document.querySelectorAll('.cur').forEach(el=>el.textContent = currentCurrency);
-        if (typeof map !== 'undefined' && map && match.mapCenter) map.setView(match.mapCenter, 13);
-        identify(); // re-sync the server session with the correct country
-        recalcFare();
-      }
-    }catch(e){ /* silent — stay on default Uganda */ }
+    const match = await resolveCountryForCoords(pos.coords.latitude, pos.coords.longitude);
+    if (!match) return; // unrecognized location — stay on default
+    if (!match.active){
+      toast(`GoFair isn't available in ${match.name} yet — showing Uganda for now`);
+      return;
+    }
+    if (match.mapCenter && typeof map !== 'undefined' && map) map.setView(match.mapCenter, 13);
+    applyCountry(match);
+    recalcFare();
   }, ()=>{ /* permission denied or unavailable — silent fallback */ }, { timeout: 8000, maximumAge: 600000 });
 }
 
@@ -498,7 +524,23 @@ function initMap(){
   });
 }
 function pinIcon(cls, label){ return L.divIcon({className:'', html:`<div class="pin-label ${cls}">${label}</div>`, iconAnchor:[20,10]}); }
-function setPickup(latlng, name){ pickup={latlng,name}; if(pickupMarker) map.removeLayer(pickupMarker); pickupMarker=L.marker(latlng,{icon:pinIcon('pickup','Pickup')}).addTo(map); document.getElementById('pickupInput').value=name; map.panTo(latlng); recalcFare(); }
+async function setPickup(latlng, name){
+  pickup={latlng,name}; if(pickupMarker) map.removeLayer(pickupMarker); pickupMarker=L.marker(latlng,{icon:pinIcon('pickup','Pickup')}).addTo(map); document.getElementById('pickupInput').value=name; map.panTo(latlng); recalcFare();
+
+  // The pickup point — not the rider's own device location — is what
+  // should decide currency/rates/matching: someone in Malawi can still be
+  // requesting a ride for someone standing in Zambia.
+  const match = await resolveCountryForCoords(latlng[0], latlng[1]);
+  if (!match) return; // unrecognized location — keep whatever country was already active
+  if (!match.active){
+    toast(`GoFair isn't available for pickups in ${match.name} yet`);
+    return;
+  }
+  if (match.code !== myCountry){
+    applyCountry(match);
+    recalcFare(); // refresh the suggested fare/currency now that the country changed
+  }
+}
 function setDrop(latlng, name){ drop={latlng,name}; if(dropMarker) map.removeLayer(dropMarker); dropMarker=L.marker(latlng,{icon:pinIcon('drop','Drop-off')}).addTo(map); document.getElementById('dropInput').value=name; if(pickup&&drop) map.fitBounds(L.latLngBounds([pickup.latlng,drop.latlng]),{padding:[70,70]}); recalcFare(); }
 let selectedVehicleType = 'motorcycle';
 function recalcFare(){
@@ -1253,9 +1295,39 @@ function wireRadioGroup(name, onChange){
 }
 wireRadioGroup('regVehicleType');
 wireRadioGroup('docType', (value)=>{
-  const label = document.getElementById('docUploadLabel');
-  label.firstChild.textContent = value === 'national_id' ? 'National ID photo' : 'Driving Permit photo';
+  updateDocUploadLabel(value);
 });
+function updateDocUploadLabel(docType){
+  const label = document.getElementById('docUploadLabel');
+  const country = regCountriesList.find(c=>c.code===document.getElementById('regCountry').value);
+  const names = country ? country.documentLabels : { national_id:'National ID', driving_license:'Driving Permit / Licence' };
+  label.firstChild.textContent = (docType === 'national_id' ? names.national_id : names.driving_license) + ' photo';
+}
+
+let regCountriesList = [];
+async function populateRegCountryDropdown(){
+  try{
+    const cfg = await getCountryConfig();
+    regCountriesList = cfg.countries || [];
+  }catch(e){ regCountriesList = []; }
+  const sel = document.getElementById('regCountry');
+  sel.innerHTML = regCountriesList.map(c=>`<option value="${c.code}">${c.flag} ${c.name} (${c.currency})</option>`).join('');
+  // default to whatever country was already detected for this session, if it's one of the launched ones
+  if (regCountriesList.some(c=>c.code===myCountry)) sel.value = myCountry;
+  updateRegCountryDependentLabels();
+}
+function updateRegCountryDependentLabels(){
+  const country = regCountriesList.find(c=>c.code===document.getElementById('regCountry').value);
+  if (!country) return;
+  document.getElementById('docTypeNationalLabel').textContent = country.documentLabels.national_id;
+  document.getElementById('docTypeLicenseLabel').textContent = country.documentLabels.driving_license;
+  const checkedDocType = document.querySelector('input[name="docType"]:checked')?.value || 'national_id';
+  updateDocUploadLabel(checkedDocType);
+  document.getElementById('regCountryNote').textContent =
+    `Fares and your wallet will use ${country.currency} — minimum balance to receive requests: ${country.currency} ${fmtUGX(country.minWalletBalance)}.`;
+}
+document.getElementById('regCountry').addEventListener('change', updateRegCountryDependentLabels);
+populateRegCountryDropdown();
 
 document.getElementById('btnSubmitRegistration').onclick = async ()=>{
   const fullName = document.getElementById('regFullName').value.trim();
@@ -1280,7 +1352,7 @@ document.getElementById('btnSubmitRegistration').onclick = async ()=>{
     const selfie = await fileToBase64(selfieFile);
     const res = await fetch('/api/driver/register', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ fullName, phone, password, country: myCountry, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, documentPhoto, selfie })
+      body: JSON.stringify({ fullName, phone, password, country: document.getElementById('regCountry').value || myCountry, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, documentPhoto, selfie })
     });
     const data = await res.json();
     if (!res.ok){ toast(data.error || 'Could not submit application'); return; }

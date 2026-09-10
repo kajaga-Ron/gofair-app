@@ -586,3 +586,41 @@ connected to the same live app at the same time.
   pull from either competitor's current app — treat them as a
   well-informed starting point, not a guarantee, and adjust quickly if
   real trips feel mispriced in either direction.
+
+## Drivers now explicitly select their country at registration
+
+Previously, a driver's country was set silently from ambient GPS/pickup
+detection at the moment they registered — which meant it could
+accidentally be wrong if that detection had drifted for any reason
+(e.g. testing pickup points in a different country right before
+registering). Drivers now pick their country explicitly from a dropdown
+at the top of the registration form, and that's what's actually sent to
+the server — no ambient detection involved in this decision anymore.
+
+Selecting a country now also updates, live, in the registration form:
+- **The ID document labels**, using each country's real terminology:
+  - Uganda: National ID / Driving Permit
+  - Zambia: **National Registration Card (NRC)** / Driving Licence
+  - Malawi: National Identity Card / Driving Licence
+  - (Botswana: **Omang (National ID)** / Driving Licence — ready for
+    when it's activated)
+- **A note showing the currency and minimum wallet balance** for that
+  country, so a driver knows what they're signing up for before they
+  submit
+
+## Diagnosing "rider request never reaches the driver"
+
+If a test ride isn't showing up on the driver side, the most likely
+cause as of this update is a **country mismatch** — a driver only ever
+sees requests whose *pickup point* resolves to the same country they
+registered under. Since currency/country now follows the pickup point
+(an earlier fix in this README), it's easy to end up testing with a
+driver registered in one country while your rider's last-set pickup
+point was somewhere else — the app is correctly refusing to cross-match
+them, but it looks like a bug if you don't know why.
+
+**To rule this out**: confirm the rider's pickup point and the driver's
+registered country actually match, confirm the driver is Approved (not
+still Pending), confirm both vehicle types match (motorcycle vs car),
+and confirm `FREE_TRIAL_MODE` is still set if the driver's wallet
+balance is at zero — any one of these silently blocks the match.
