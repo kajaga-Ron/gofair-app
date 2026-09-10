@@ -624,3 +624,28 @@ registered country actually match, confirm the driver is Approved (not
 still Pending), confirm both vehicle types match (motorcycle vs car),
 and confirm `FREE_TRIAL_MODE` is still set if the driver's wallet
 balance is at zero — any one of these silently blocks the match.
+
+## Fixed: wallet balance and top-up amount showing different currencies
+
+A driver could see their wallet balance correctly in ZMW while the
+"Enter amount" field right below it still said "(UGX)" — a real
+inconsistency, caught during testing.
+
+**Root cause**: the driver's own wallet display was reading a shared
+`currentCurrency` variable that only got updated by *rider-side* pickup
+detection — so a driver's wallet showed whatever currency a rider
+search had last set in that same browser tab, coincidentally or not,
+while a handful of static input placeholders were never wired to update
+at all.
+
+**Fixed properly**: introduced one function (`setCurrentCurrency`) that
+both the rider's pickup-detection path and the driver's own wallet-load
+path now both call — so a driver's currency is always authoritative
+from their own account data, completely independent of anything a
+rider search did earlier in the same session. Every place currency
+shows (wallet balance, minimum-balance banner, top-up input, fare
+counter-offer inputs) now updates together, from one source of truth.
+
+**Verified with an isolated test against the real shipped code** (not a
+reimplementation) — confirmed a Zambia driver's wallet load correctly
+updates all four currency-displaying elements to ZMW simultaneously.

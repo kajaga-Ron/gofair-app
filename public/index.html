@@ -466,8 +466,7 @@ async function resolveCountryForCoords(lat, lng){
 function applyCountry(match){
   if (!match || match.code === myCountry) return;
   myCountry = match.code;
-  currentCurrency = match.currency;
-  document.querySelectorAll('.cur').forEach(el=>el.textContent = currentCurrency);
+  setCurrentCurrency(match.currency);
   identify(); // re-sync the server session — matching, fare rates, and driver rooms all key off this
 }
 
@@ -676,7 +675,7 @@ function renderThreads(){
         <button class="btn btn-outline btnCounter">Counter</button>
         <button class="btn btn-danger btnDecline">Decline</button>
       </div>
-      <div class="counter-row hidden"><input type="number" placeholder="Your counter (UGX)"><button class="btn btn-primary" style="margin-top:0;flex:none;padding:9px 14px;">Send</button></div>
+      <div class="counter-row hidden"><input type="number" placeholder="Your counter (${currentCurrency})"><button class="btn btn-primary" style="margin-top:0;flex:none;padding:9px 14px;">Send</button></div>
     `;
     div.querySelector('.btnAccept').onclick = ()=> socket.emit('thread:accept', {threadId:t.id});
     div.querySelector('.btnDecline').onclick = ()=> socket.emit('thread:decline', {threadId:t.id, by:'rider'});
@@ -1015,7 +1014,7 @@ function renderDriverRequests(){
         <button class="btn btn-primary" id="acc-${r.id}">Accept fare</button>
         <button class="btn btn-outline" id="cnt-${r.id}">Counter-offer</button>
       </div>
-      <div class="counter-row hidden" id="cntrow-${r.id}"><input type="number" placeholder="Your price (UGX)"><button class="btn btn-primary" style="margin-top:0;flex:none;padding:9px 14px;">Send</button></div>
+      <div class="counter-row hidden" id="cntrow-${r.id}"><input type="number" placeholder="Your price (${currentCurrency})"><button class="btn btn-primary" style="margin-top:0;flex:none;padding:9px 14px;">Send</button></div>
       ${activeThreadId ? '<div class="waiting-note">Waiting for rider to respond…</div>' : ''}
     `;
     card.querySelector(`#acc-${r.id}`).onclick = ()=>{
@@ -1061,7 +1060,7 @@ function showDriverCounterPrompt(thread){
       <button class="btn btn-outline bCnt">Counter again</button>
       <button class="btn btn-danger bDec">Decline</button>
     </div>
-    <div class="counter-row hidden"><input type="number" placeholder="Your price (UGX)"><button class="btn btn-primary" style="margin-top:0;flex:none;padding:9px 14px;">Send</button></div>
+    <div class="counter-row hidden"><input type="number" placeholder="Your price (${currentCurrency})"><button class="btn btn-primary" style="margin-top:0;flex:none;padding:9px 14px;">Send</button></div>
   `;
   card.querySelector('.bAcc').onclick = ()=> socket.emit('thread:accept', {threadId:thread.id});
   card.querySelector('.bDec').onclick = ()=>{ socket.emit('thread:decline', {threadId:thread.id, by:'driver'}); card.remove(); };
@@ -1128,8 +1127,22 @@ function updateDriverUI(status, reviewNote, wallet){
 }
 
 let currentCommissionRate = 0.07;
+// The one place currentCurrency actually changes, and everything on
+// screen that shows a currency gets refreshed here too — used both when
+// a rider's pickup point changes country, and when a driver's own
+// wallet loads. Previously these two paths didn't share this, which is
+// exactly how a driver's wallet balance and its own top-up input could
+// end up showing two different currencies in the same screen.
+function setCurrentCurrency(code){
+  currentCurrency = code;
+  document.querySelectorAll('.cur').forEach(el=>el.textContent = currentCurrency);
+  const topupInput = document.getElementById('topupAmount');
+  if (topupInput) topupInput.placeholder = `Amount (${currentCurrency})`;
+}
+
 function renderWallet(wallet){
   currentCommissionRate = wallet.commissionRate;
+  if (wallet.currency) setCurrentCurrency(wallet.currency); // authoritative for THIS driver's own account, regardless of any rider-side state left over in the same session
   document.getElementById('walletAmount').textContent = `${currentCurrency} ${fmtUGX(wallet.walletBalance)}`;
   const banner = document.getElementById('walletLowBanner');
   if (wallet.freeTrialMode){
