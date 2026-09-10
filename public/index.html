@@ -32,7 +32,7 @@
   .sheet-handle{width:36px;height:4px;background:var(--paper-dim);border-radius:99px;margin:2px auto 12px;}
   .sheet h2{margin:0 0 2px;font-size:17px;font-weight:800;letter-spacing:-0.01em;}
   .sheet .sub{margin:0 0 14px;color:var(--ink-soft);font-size:13px;}
-  .field-stack{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff;}
+  .field-stack{border:1px solid var(--line);border-radius:12px;overflow:visible;background:#fff;}
   .field{display:flex;align-items:center;gap:10px;padding:12px 14px;position:relative;}
   .field + .field{border-top:1px solid var(--line);}
   .dot{width:9px;height:9px;border-radius:50%;flex:none;}
@@ -65,6 +65,18 @@
   .thread-top{display:flex;align-items:center;gap:10px;}
   .avatar{width:38px;height:38px;border-radius:50%;background:var(--asphalt-2);color:var(--paper);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex:none;}
   .thread-name{font-weight:700;font-size:14px;flex:1;}
+  .vehicle-line{font-weight:500;font-size:11.5px;color:var(--ink-soft);margin-top:1px;}
+  .contact-row{display:flex;gap:6px;margin-top:12px;}
+  .contact-btn{flex:1;font-size:12px;padding:9px 4px;margin-top:0;text-align:center;text-decoration:none;}
+  .chat-panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:10px;}
+  .chat-quick-replies{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;}
+  .chip-btn{border:1px solid var(--line);background:var(--paper-dim);border-radius:999px;padding:6px 10px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit;color:var(--ink);}
+  .chat-messages{max-height:140px;overflow-y:auto;margin-bottom:8px;display:flex;flex-direction:column;gap:6px;}
+  .chat-bubble{max-width:80%;padding:7px 11px;border-radius:12px;font-size:13px;line-height:1.4;}
+  .chat-bubble.mine{align-self:flex-end;background:var(--asphalt);color:var(--paper);}
+  .chat-bubble.theirs{align-self:flex-start;background:var(--paper-dim);color:var(--ink);}
+  .chat-input-row{display:flex;gap:6px;}
+  .chat-input-row input{flex:1;border:1px solid var(--line);border-radius:10px;padding:9px 10px;font-size:13.5px;font-family:inherit;}
   .thread-status{font-size:11px;color:var(--ink-soft);font-weight:600;}
   .offer-trail{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0;}
   .offer-chip{font-size:11.5px;padding:4px 9px;border-radius:999px;background:var(--paper-dim);font-variant-numeric:tabular-nums;}
@@ -173,6 +185,32 @@
         <div><div class="status-title" id="tripDriverName">–</div><div class="status-sub" id="tripCarInfo">Fare agreed at <span id="tripFareVal"></span></div></div>
         <div class="eta-chip" id="tripEta">on the way</div>
       </div>
+      <div class="contact-row">
+        <a class="btn btn-outline contact-btn" id="btnCallDriver" href="#">📞 Call driver</a>
+        <button class="btn btn-outline contact-btn" id="btnMessageDriver">💬 Message</button>
+        <button class="btn btn-outline contact-btn" id="btnShareTripRider">📍 Share trip</button>
+        <button class="btn btn-outline contact-btn" id="btnSafetyRider" style="border-color:var(--rust);color:var(--rust);">🆘 Safety</button>
+      </div>
+      <div id="riderSafetyPanel" class="chat-panel hidden">
+        <a class="btn btn-primary" id="btnCallSupportRider" href="#" style="background:var(--rust);margin-top:0;">📞 Call GoFair Support</a>
+        <p class="sub" style="margin:10px 0 6px;">Or describe the issue — this goes straight to an admin:</p>
+        <div class="field-stack" style="margin-bottom:8px;">
+          <div class="field"><input type="text" id="riderReportInput" placeholder="What's happening?"></div>
+        </div>
+        <button class="btn btn-outline" id="btnSubmitRiderReport">Send report</button>
+      </div>
+      <div id="riderChatPanel" class="chat-panel hidden">
+        <div class="chat-quick-replies">
+          <button class="chip-btn" data-msg="Where are you now?">Where are you?</button>
+          <button class="chip-btn" data-msg="Is the pickup location correct?">Confirm location</button>
+          <button class="chip-btn" data-msg="I'm running a few minutes late.">Running late</button>
+        </div>
+        <div class="chat-messages" id="riderChatMessages"></div>
+        <div class="chat-input-row">
+          <input type="text" id="riderChatInput" placeholder="Type a message…">
+          <button class="btn btn-primary" id="riderChatSend" style="margin-top:0;flex:none;padding:9px 14px;">Send</button>
+        </div>
+      </div>
       <div class="trip-steps" id="tripStatusText"><b>Driver is on the way</b> to your pickup point.</div>
       <p class="sub" style="margin-top:14px;">Paying cash? The trip finishes automatically once your driver marks it complete. Or pay by card now instead:</p>
       <button class="btn btn-primary" id="btnPayByCard" style="margin-top:8px;background:var(--asphalt);">Pay by Visa / Mastercard</button>
@@ -233,6 +271,7 @@
           <div class="field"><input id="regDocNumber" placeholder="ID number"></div>
           <div class="field"><input id="regVehiclePlate" placeholder="Vehicle plate number"></div>
           <div class="field"><input id="regVehicleModel" placeholder="Vehicle model (optional)"></div>
+          <div class="field"><input id="regVehicleColor" placeholder="Vehicle color"></div>
         </div>
         <p class="sub" style="margin-bottom:6px;">Upload clear photos — these are checked before approval.</p>
         <div class="upload-row">
@@ -383,12 +422,48 @@ if (!myPhone) {
   localStorage.setItem('gofair_rider_phone', myPhone);
 }
 let driverToken = localStorage.getItem('gofair_driver_token') || '';
+let myCountry = 'UG';
+let currentCurrency = 'UGX';
 
 const socket = io();
 const connState = document.getElementById('connState');
 socket.on('connect', ()=>{ connState.textContent='live'; connState.className='conn-state live'; identify(); });
 socket.on('disconnect', ()=>{ connState.textContent='reconnecting…'; connState.className='conn-state down'; });
-function identify(){ socket.emit('identify', { role, name: myName, token: role==='driver' ? driverToken : undefined, phone: role==='rider' ? myPhone : undefined }); }
+function identify(){ socket.emit('identify', { role, name: myName, token: role==='driver' ? driverToken : undefined, phone: role==='rider' ? myPhone : undefined, country: myCountry }); }
+
+// GPS-based country detection: silently falls back to Uganda if location
+// is denied, unavailable, or the detected country isn't launched yet —
+// never blocks the app from working.
+async function detectCountryFromGPS(){
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(async (pos)=>{
+    try{
+      const { latitude, longitude } = pos.coords;
+      const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=3`, { headers:{'Accept-Language':'en'} });
+      const geoData = await geoRes.json();
+      const detected = (geoData.address?.country_code || '').toUpperCase();
+      if (!detected) return;
+
+      const cfgRes = await fetch('/api/config/countries');
+      const cfg = await cfgRes.json();
+      const match = cfg.allCountries.find(c=>c.code===detected);
+      if (!match) return; // country we don't know at all — stay on default
+
+      if (!match.active){
+        toast(`GoFair isn't available in ${match.name} yet — showing Uganda for now`);
+        return;
+      }
+      if (match.code !== myCountry){
+        myCountry = match.code;
+        currentCurrency = match.currency;
+        document.querySelectorAll('.cur').forEach(el=>el.textContent = currentCurrency);
+        if (typeof map !== 'undefined' && map && match.mapCenter) map.setView(match.mapCenter, 13);
+        identify(); // re-sync the server session with the correct country
+        recalcFare();
+      }
+    }catch(e){ /* silent — stay on default Uganda */ }
+  }, ()=>{ /* permission denied or unavailable — silent fallback */ }, { timeout: 8000, maximumAge: 600000 });
+}
 
 function toast(msg){
   const t = document.getElementById('toast');
@@ -436,11 +511,11 @@ function recalcFare(){
       if (!res || res.error){
         // server unreachable — fall back to the plain formula so the app still works
         const s = suggestFare(km, selectedVehicleType);
-        note.textContent = `${km.toFixed(1)} km trip · typical fare ~UGX ${fmtUGX(s)}`;
+        note.textContent = `${km.toFixed(1)} km trip · typical fare ~${currentCurrency} ${fmtUGX(s)}`;
         if (!document.getElementById('fareInput').value) document.getElementById('fareInput').value = s;
         return;
       }
-      let noteText = `${km.toFixed(1)} km trip · typical fare ~UGX ${fmtUGX(res.suggestedFare)}`;
+      let noteText = `${km.toFixed(1)} km trip · typical fare ~${currentCurrency} ${fmtUGX(res.suggestedFare)}`;
       if (res.demandMultiplier > 1) noteText += ' · busy right now';
       if (res.timeMultiplier > 1) noteText += ' · peak hours';
       if (res.penaltyApplied) noteText += ' · includes a small adjustment from your last cancelled trip';
@@ -505,7 +580,7 @@ document.getElementById('btnRequest').onclick = ()=>{
   if (!currentFare || currentFare<=0){ toast('Enter a fare amount'); return; }
   const km = haversineKm(pickup.latlng, drop.latlng);
   document.getElementById('searchPickupName').textContent = pickup.name;
-  document.getElementById('searchFareShown').textContent = `UGX ${fmtUGX(currentFare)}`;
+  document.getElementById('searchFareShown').textContent = `${currentCurrency} ${fmtUGX(currentFare)}`;
   showStep('stepSearching');
   socket.emit('ride:create', {
     pickup: pickup.latlng, drop: drop.latlng, pickupName: pickup.name, dropName: drop.name,
@@ -546,15 +621,16 @@ function renderThreads(){
     const last = t.offers[t.offers.length-1];
     const div = document.createElement('div');
     div.className = 'thread-card';
+    const vehicleLine = [t.vehicleColor, t.vehicleModel].filter(Boolean).join(' ') + (t.vehiclePlate ? ` · ${t.vehiclePlate}` : '');
     div.innerHTML = `
       <div class="thread-top">
         <div class="avatar">${initials(t.driverName)}</div>
-        <div class="thread-name">${t.driverName}</div>
+        <div class="thread-name">${t.driverName}${vehicleLine.trim() !== '·' && vehicleLine.trim() ? `<div class="vehicle-line">${vehicleLine}</div>` : ''}</div>
         <div class="thread-status">${last.by==='driver' ? 'their move' : 'waiting on them'}</div>
       </div>
-      <div class="offer-trail">${t.offers.map(o=>`<span class="offer-chip ${o.by==='rider'?'mine':''}">${o.by==='rider'?'You':'Them'}: UGX ${fmtUGX(o.price)}</span>`).join('')}</div>
+      <div class="offer-trail">${t.offers.map(o=>`<span class="offer-chip ${o.by==='rider'?'mine':''}">${o.by==='rider'?'You':'Them'}: ${currentCurrency} ${fmtUGX(o.price)}</span>`).join('')}</div>
       <div class="thread-actions">
-        <button class="btn btn-primary btnAccept">Accept UGX ${fmtUGX(last.price)}</button>
+        <button class="btn btn-primary btnAccept">Accept ${currentCurrency} ${fmtUGX(last.price)}</button>
         <button class="btn btn-outline btnCounter">Counter</button>
         <button class="btn btn-danger btnDecline">Decline</button>
       </div>
@@ -577,24 +653,55 @@ socket.on('ride:matched', (info)=>{
   if (info.role === 'rider'){
     document.getElementById('tripAvatar').textContent = initials(info.counterpartName);
     document.getElementById('tripDriverName').textContent = info.counterpartName;
-    document.getElementById('tripFareVal').textContent = `UGX ${fmtUGX(info.price)}`;
+    const vehicleBits = [info.vehicleColor, info.vehicleModel].filter(Boolean).join(' ');
+    document.getElementById('tripCarInfo').innerHTML = `${vehicleBits ? vehicleBits + ' · ' : ''}${info.vehiclePlate ? `<b>${info.vehiclePlate}</b> · ` : ''}Fare agreed at ${currentCurrency} ${fmtUGX(info.price)}`;
     document.getElementById('tripStatusText').innerHTML = `<b>Driver is on the way</b> to your pickup point.`;
+    document.getElementById('btnCallDriver').href = info.counterpartPhone ? `tel:${info.counterpartPhone}` : '#';
+    document.getElementById('riderChatMessages').innerHTML = '';
+    document.getElementById('riderChatPanel').classList.add('hidden');
     showStep('stepTrip');
     spawnDriverOnMap();
-    toast(`Matched at UGX ${fmtUGX(info.price)}`);
+    toast(`Matched at ${currentCurrency} ${fmtUGX(info.price)}`);
   } else {
-    toast(`Ride confirmed with ${info.counterpartName} at UGX ${fmtUGX(info.price)}`);
+    toast(`Ride confirmed with ${info.counterpartName} at ${currentCurrency} ${fmtUGX(info.price)}`);
     renderActiveTrip(info);
     renderDriverRequests();
   }
 });
+let currentDriverTrip = null;
 function renderActiveTrip(info){
+  currentDriverTrip = info;
   const card = document.getElementById('activeTripCard');
   card.className = 'active-trip-card';
   card.innerHTML = `
     <div class="title">Trip in progress</div>
-    <div class="sub2">${info.counterpartName} · agreed fare UGX ${fmtUGX(info.price)}</div>
-    <button class="btn btn-outline" style="margin-top:0;" id="btnMarkArrived">Mark arrived at pickup</button>
+    <div class="sub2">${info.counterpartName} · agreed fare ${currentCurrency} ${fmtUGX(info.price)}</div>
+    <div class="contact-row">
+      <a class="btn btn-outline contact-btn" href="${info.counterpartPhone ? 'tel:'+info.counterpartPhone : '#'}">📞 Call rider</a>
+      <button class="btn btn-outline contact-btn" id="btnMessageRider">💬 Message</button>
+      <button class="btn btn-outline contact-btn" id="btnSafetyDriver" style="border-color:var(--rust);color:var(--rust);">🆘 Safety</button>
+    </div>
+    <div id="driverSafetyPanel" class="chat-panel hidden">
+      <a class="btn btn-primary" id="btnCallSupportDriver" href="#" style="background:var(--rust);margin-top:0;">📞 Call GoFair Support</a>
+      <p class="sub" style="margin:10px 0 6px;">Or describe the issue — this goes straight to an admin:</p>
+      <div class="field-stack" style="margin-bottom:8px;">
+        <div class="field"><input type="text" id="driverReportInput" placeholder="What's happening?"></div>
+      </div>
+      <button class="btn btn-outline" id="btnSubmitDriverReport">Send report</button>
+    </div>
+    <div id="driverChatPanel" class="chat-panel hidden">
+      <div class="chat-quick-replies">
+        <button class="chip-btn" data-msg="I'm on my way.">On my way</button>
+        <button class="chip-btn" data-msg="I've arrived at the pickup point.">I've arrived</button>
+        <button class="chip-btn" data-msg="Can you confirm your exact location?">Confirm location</button>
+      </div>
+      <div class="chat-messages" id="driverChatMessages"></div>
+      <div class="chat-input-row">
+        <input type="text" id="driverChatInput" placeholder="Type a message…">
+        <button class="btn btn-primary" id="driverChatSend" style="margin-top:0;flex:none;padding:9px 14px;">Send</button>
+      </div>
+    </div>
+    <button class="btn btn-outline" style="margin-top:10px;" id="btnMarkArrived">Mark arrived at pickup</button>
     <button class="btn btn-primary" style="margin-top:8px;" id="btnMarkTripComplete" disabled>Mark trip complete</button>
   `;
   card.querySelector('#btnMarkArrived').onclick = (e)=>{
@@ -603,8 +710,45 @@ function renderActiveTrip(info){
     card.querySelector('#btnMarkTripComplete').disabled = false;
   };
   card.querySelector('#btnMarkTripComplete').onclick = ()=> socket.emit('trip:complete', { threadId: info.threadId });
+  card.querySelector('#btnMessageRider').onclick = ()=> document.getElementById('driverChatPanel').classList.toggle('hidden');
+  card.querySelector('#btnSafetyDriver').onclick = async ()=>{
+    const panel = document.getElementById('driverSafetyPanel');
+    panel.classList.toggle('hidden');
+    const cfg = await loadSupportConfig();
+    document.getElementById('btnCallSupportDriver').href = cfg.phone ? `tel:${cfg.phone}` : '#';
+  };
+  card.querySelector('#btnSubmitDriverReport').onclick = async ()=>{
+    const input = document.getElementById('driverReportInput');
+    if (!input.value.trim()){ toast('Describe what\'s happening first'); return; }
+    try{
+      await fetch('/api/support/report', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ reporterRole:'driver', reporterPhone: null, threadId: currentDriverTrip?.threadId, message: input.value.trim() })
+      });
+      toast('Report sent — an admin will follow up');
+      input.value = '';
+      document.getElementById('driverSafetyPanel').classList.add('hidden');
+    }catch(e){ toast('Could not send — try calling support instead'); }
+  };
+  card.querySelectorAll('#driverChatPanel .chip-btn').forEach(chip=>{
+    chip.onclick = ()=> sendDriverChat(chip.dataset.msg);
+  });
+  card.querySelector('#driverChatSend').onclick = ()=>{
+    const input = card.querySelector('#driverChatInput');
+    if (input.value.trim()) sendDriverChat(input.value.trim());
+    input.value = '';
+  };
+  card.querySelector('#driverChatInput').addEventListener('keydown', (e)=>{
+    if (e.key === 'Enter') card.querySelector('#driverChatSend').click();
+  });
+}
+function sendDriverChat(text){
+  if (!currentDriverTrip) return;
+  socket.emit('chat:send', { threadId: currentDriverTrip.threadId, text });
+  appendChatBubble('driverChatMessages', text, true);
 }
 socket.on('trip:cancelledByRider', ({threadId, penalized})=>{
+  currentDriverTrip = null;
   document.getElementById('activeTripCard').classList.add('hidden');
   toast(penalized ? 'Rider cancelled after you arrived — noted on their account' : 'Rider cancelled the trip');
   renderDriverRequests();
@@ -635,6 +779,83 @@ socket.on('trip:driverArrived', ({threadId})=>{
   document.getElementById('tripEta').textContent = 'Arrived';
   document.getElementById('tripStatusText').innerHTML = `<b>${matchedInfo.counterpartName} has arrived</b> at the pickup point.`;
   toast('Your driver has arrived');
+});
+
+let supportConfig = null;
+async function loadSupportConfig(){
+  if (supportConfig) return supportConfig;
+  try{ supportConfig = await (await fetch('/api/config/support')).json(); }catch(e){ supportConfig = {}; }
+  return supportConfig;
+}
+
+document.getElementById('btnSafetyRider').onclick = async ()=>{
+  const panel = document.getElementById('riderSafetyPanel');
+  panel.classList.toggle('hidden');
+  const cfg = await loadSupportConfig();
+  document.getElementById('btnCallSupportRider').href = cfg.phone ? `tel:${cfg.phone}` : '#';
+};
+document.getElementById('btnSubmitRiderReport').onclick = async ()=>{
+  const input = document.getElementById('riderReportInput');
+  if (!input.value.trim()){ toast('Describe what\'s happening first'); return; }
+  try{
+    await fetch('/api/support/report', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ reporterRole:'rider', reporterPhone: myPhone, threadId: matchedInfo?.threadId, message: input.value.trim() })
+    });
+    toast('Report sent — an admin will follow up');
+    input.value = '';
+    document.getElementById('riderSafetyPanel').classList.add('hidden');
+  }catch(e){ toast('Could not send — try calling support instead'); }
+};
+
+document.getElementById('btnShareTripRider').onclick = async ()=>{
+  if (!matchedInfo) return;
+  const link = `${window.location.origin}/track.html?trip=${matchedInfo.threadId}`;
+  const text = `I'm on a GoFair trip with ${matchedInfo.counterpartName}${matchedInfo.vehiclePlate ? ' ('+matchedInfo.vehiclePlate+')' : ''}. Track it here: ${link}`;
+  if (navigator.share){
+    try{ await navigator.share({ title: 'My GoFair trip', text, url: link }); return; }catch(e){ /* user cancelled or unsupported — fall through to copy */ }
+  }
+  try{ await navigator.clipboard.writeText(text); toast('Trip link copied — paste it to share'); }
+  catch(e){ prompt('Copy this link to share your trip:', text); }
+};
+
+document.getElementById('btnMessageDriver').onclick = ()=>{
+  document.getElementById('riderChatPanel').classList.toggle('hidden');
+};
+document.querySelectorAll('#riderChatPanel .chip-btn').forEach(chip=>{
+  chip.onclick = ()=> sendRiderChat(chip.dataset.msg);
+});
+document.getElementById('riderChatSend').onclick = ()=>{
+  const input = document.getElementById('riderChatInput');
+  if (input.value.trim()) sendRiderChat(input.value.trim());
+  input.value = '';
+};
+document.getElementById('riderChatInput').addEventListener('keydown', (e)=>{
+  if (e.key === 'Enter') document.getElementById('riderChatSend').click();
+});
+function sendRiderChat(text){
+  if (!matchedInfo) return;
+  socket.emit('chat:send', { threadId: matchedInfo.threadId, text });
+  appendChatBubble('riderChatMessages', text, true);
+}
+function appendChatBubble(containerId, text, mine){
+  const wrap = document.getElementById(containerId);
+  const div = document.createElement('div');
+  div.className = `chat-bubble ${mine ? 'mine' : 'theirs'}`;
+  div.textContent = text;
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+socket.on('chat:message', (msg)=>{
+  if (role === 'rider' && matchedInfo && msg.threadId === matchedInfo.threadId){
+    appendChatBubble('riderChatMessages', msg.text, false);
+    document.getElementById('riderChatPanel').classList.remove('hidden');
+    toast(`${matchedInfo.counterpartName}: ${msg.text}`);
+  } else if (role === 'driver' && currentDriverTrip && msg.threadId === currentDriverTrip.threadId){
+    appendChatBubble('driverChatMessages', msg.text, false);
+    document.getElementById('driverChatPanel')?.classList.remove('hidden');
+    toast(`${currentDriverTrip.counterpartName}: ${msg.text}`);
+  }
 });
 
 document.getElementById('btnCancelTrip').onclick = ()=>{
@@ -706,17 +927,18 @@ document.querySelectorAll('#starRow .star').forEach(star=>{
 
 socket.on('trip:completed', (info)=>{
   if (info.role === 'rider'){
-    document.getElementById('doneFareShown').textContent = `${info.paidByCard ? 'Paid by card: ' : ''}UGX ${fmtUGX(info.price)}${info.paidByCard ? '' : ' paid to ' + info.driverName}`;
+    document.getElementById('doneFareShown').textContent = `${info.paidByCard ? 'Paid by card: ' : ''}${currentCurrency} ${fmtUGX(info.price)}${info.paidByCard ? '' : ' paid to ' + info.driverName}`;
     selectedRatingStars = 0;
     document.querySelectorAll('#starRow .star').forEach(s=>s.classList.remove('filled'));
     showStep('stepDone');
   } else {
     // driver side
+    currentDriverTrip = null;
     document.getElementById('activeTripCard').classList.add('hidden');
     if (info.paidByCard){
       toast(`Trip complete — paid out to your mobile money, minus ${Math.round(currentCommissionRate*100)}% commission`);
     } else {
-      toast(`Trip complete — UGX ${fmtUGX(Math.round(info.price*currentCommissionRate))} commission deducted`);
+      toast(`Trip complete — ${currentCurrency} ${fmtUGX(Math.round(info.price*currentCommissionRate))} commission deducted`);
     }
     renderDriverRequests();
   }
@@ -744,7 +966,7 @@ function renderDriverRequests(){
     card.innerHTML = `
       <div class="req-top">
         <div class="req-route">${r.pickupName} <span class="to">→ ${r.dropName}</span></div>
-        <div class="req-price">UGX ${fmtUGX(r.proposedFare)}</div>
+        <div class="req-price">${currentCurrency} ${fmtUGX(r.proposedFare)}</div>
       </div>
       <div class="req-dist">${r.km.toFixed(1)} km · ${r.riderName}'s proposed fare</div>
       <div class="req-actions">
@@ -778,7 +1000,7 @@ socket.on('thread:update', (thread)=>{
   if (role === 'driver' && thread.driverName === myName){
     const last = thread.offers[thread.offers.length-1];
     if (last.by === 'rider'){
-      toast(`Rider countered: UGX ${fmtUGX(last.price)}`);
+      toast(`Rider countered: ${currentCurrency} ${fmtUGX(last.price)}`);
       showDriverCounterPrompt(thread);
     }
   }
@@ -790,7 +1012,7 @@ function showDriverCounterPrompt(thread){
   card.className = 'req-card';
   const last = thread.offers[thread.offers.length-1];
   card.innerHTML = `
-    <div class="req-top"><div class="req-route"><b>Rider countered</b></div><div class="req-price">UGX ${fmtUGX(last.price)}</div></div>
+    <div class="req-top"><div class="req-route"><b>Rider countered</b></div><div class="req-price">${currentCurrency} ${fmtUGX(last.price)}</div></div>
     <div class="req-dist">On thread with ${r ? r.riderName : 'rider'}</div>
     <div class="req-actions">
       <button class="btn btn-primary bAcc">Accept</button>
@@ -866,9 +1088,19 @@ function updateDriverUI(status, reviewNote, wallet){
 let currentCommissionRate = 0.07;
 function renderWallet(wallet){
   currentCommissionRate = wallet.commissionRate;
-  document.getElementById('walletAmount').textContent = `UGX ${fmtUGX(wallet.walletBalance)}`;
-  document.getElementById('walletMinAmount').textContent = `UGX ${fmtUGX(wallet.minBalance)}`;
-  document.getElementById('walletLowBanner').classList.toggle('hidden', wallet.walletBalance >= wallet.minBalance);
+  document.getElementById('walletAmount').textContent = `${currentCurrency} ${fmtUGX(wallet.walletBalance)}`;
+  const banner = document.getElementById('walletLowBanner');
+  if (wallet.freeTrialMode){
+    banner.innerHTML = `🎉 Free trial period — no minimum wallet balance required right now. A small commission still applies to completed rides.`;
+    banner.classList.remove('hidden');
+    banner.style.background = '#D9EFE3';
+    banner.style.color = 'var(--teal)';
+  } else {
+    banner.innerHTML = `Top up your wallet to start receiving ride requests — a minimum balance of <span id="walletMinAmount">${currentCurrency} ${fmtUGX(wallet.minBalance)}</span> is required.`;
+    banner.style.background = '';
+    banner.style.color = '';
+    banner.classList.toggle('hidden', wallet.walletBalance >= wallet.minBalance);
+  }
 }
 
 socket.on('driver:status', (info)=>{
@@ -1034,6 +1266,7 @@ document.getElementById('btnSubmitRegistration').onclick = async ()=>{
   const documentNumber = document.getElementById('regDocNumber').value.trim();
   const vehiclePlate = document.getElementById('regVehiclePlate').value.trim();
   const vehicleModel = document.getElementById('regVehicleModel').value.trim();
+  const vehicleColor = document.getElementById('regVehicleColor').value.trim();
   const docFile = document.getElementById('fileDocPhoto').files[0];
   const selfieFile = document.getElementById('fileSelfie').files[0];
 
@@ -1047,7 +1280,7 @@ document.getElementById('btnSubmitRegistration').onclick = async ()=>{
     const selfie = await fileToBase64(selfieFile);
     const res = await fetch('/api/driver/register', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ fullName, phone, password, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, documentPhoto, selfie })
+      body: JSON.stringify({ fullName, phone, password, country: myCountry, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, documentPhoto, selfie })
     });
     const data = await res.json();
     if (!res.ok){ toast(data.error || 'Could not submit application'); return; }
@@ -1077,6 +1310,7 @@ document.getElementById('btnDriverLogin').onclick = async ()=>{
 
 /* ---------------- Init ---------------- */
 initMap();
+detectCountryFromGPS();
 wireSearch('pickupInput','suggestPickup', setPickup);
 wireSearch('dropInput','suggestDrop', setDrop);
 recalcFare();

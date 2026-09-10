@@ -40,6 +40,7 @@ async function initSchema() {
       vehicle_type     TEXT NOT NULL,
       vehicle_plate    TEXT NOT NULL,
       vehicle_model    TEXT,
+      vehicle_color    TEXT,
       document_photo_path TEXT,
       selfie_path      TEXT,
       status           TEXT NOT NULL DEFAULT 'pending',
@@ -49,6 +50,7 @@ async function initSchema() {
       wallet_balance   BIGINT NOT NULL DEFAULT 0
     );
     ALTER TABLE drivers ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT 'UG';
+    ALTER TABLE drivers ADD COLUMN IF NOT EXISTS vehicle_color TEXT;
 
     CREATE TABLE IF NOT EXISTS ledger_entries (
       id                   TEXT PRIMARY KEY,
@@ -95,6 +97,16 @@ async function initSchema() {
       ts              BIGINT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_card_fare_driver ON card_fare_payments(driver_id);
+
+    CREATE TABLE IF NOT EXISTS support_reports (
+      id             TEXT PRIMARY KEY,
+      reporter_role  TEXT NOT NULL,     -- 'rider' | 'driver'
+      reporter_phone TEXT,
+      thread_id      TEXT,
+      message        TEXT NOT NULL,
+      status         TEXT NOT NULL DEFAULT 'open',
+      ts             BIGINT NOT NULL
+    );
 
     CREATE TABLE IF NOT EXISTS ratings (
       id          TEXT PRIMARY KEY,

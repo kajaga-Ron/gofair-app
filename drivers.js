@@ -49,6 +49,7 @@ function rowToDriver(row) {
     vehicleType: row.vehicle_type,
     vehiclePlate: row.vehicle_plate,
     vehicleModel: row.vehicle_model,
+    vehicleColor: row.vehicle_color,
     status: row.status,
     reviewNote: row.review_note,
     submittedAt: Number(row.submitted_at),
@@ -85,7 +86,7 @@ async function findById(id) {
   return rowToDriver(rows[0]);
 }
 
-async function registerOrResubmit({ phone, password, fullName, country, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, documentPhoto, selfie }) {
+async function registerOrResubmit({ phone, password, fullName, country, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, documentPhoto, selfie }) {
   const existing = await findByPhone(phone);
   if (existing && existing.status === 'approved') {
     return { error: 'An approved driver account already exists for this phone number. Please log in instead.' };
@@ -103,21 +104,21 @@ async function registerOrResubmit({ phone, password, fullName, country, document
     await pool.query(`
       UPDATE drivers SET
         password_hash = $1, full_name = $2, country = $3, document_type = $4, document_number = $5,
-        vehicle_type = $6, vehicle_plate = $7, vehicle_model = $8,
-        document_photo_path = $9, selfie_path = $10,
-        status = 'pending', review_note = '', submitted_at = $11, reviewed_at = NULL
-      WHERE id = $12
-    `, [passwordHash, fullName, countryCode, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel,
+        vehicle_type = $6, vehicle_plate = $7, vehicle_model = $8, vehicle_color = $9,
+        document_photo_path = $10, selfie_path = $11,
+        status = 'pending', review_note = '', submitted_at = $12, reviewed_at = NULL
+      WHERE id = $13
+    `, [passwordHash, fullName, countryCode, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor,
         documentPhotoPath, selfiePath, Date.now(), id]);
   } else {
     await pool.query(`
       INSERT INTO drivers (
         id, phone, password_hash, full_name, country, document_type, document_number,
-        vehicle_type, vehicle_plate, vehicle_model, document_photo_path, selfie_path,
+        vehicle_type, vehicle_plate, vehicle_model, vehicle_color, document_photo_path, selfie_path,
         status, review_note, submitted_at, wallet_balance
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending','',$13,0)
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending','',$14,0)
     `, [id, phone, passwordHash, fullName, countryCode, documentType, documentNumber,
-        vehicleType, vehiclePlate, vehicleModel, documentPhotoPath, selfiePath, Date.now()]);
+        vehicleType, vehiclePlate, vehicleModel, vehicleColor, documentPhotoPath, selfiePath, Date.now()]);
   }
   return { driver: await findById(id) };
 }
@@ -187,11 +188,23 @@ async function walletView(driver) {
     minBalance: country.minWalletBalance,
     currency: country.currency,
     commissionRate: COMMISSION_RATE,
+    freeTrialMode: isFreeTrialMode(),
     ledger: rows.map(rowToLedgerEntry)
   };
 }
 
+// Set FREE_TRIAL_MODE=true in your hosting environment to let every
+// driver receive ride requests regardless of wallet balance — useful for
+// an introductory period where you want people to try the app without
+// any deposit. Flip it back to false (or remove it) whenever you're
+// ready to start requiring the deposit again — no code changes needed
+// either time, no drivers need to re-register, nothing else changes.
+function isFreeTrialMode() {
+  return process.env.FREE_TRIAL_MODE === 'true';
+}
+
 function hasSufficientBalance(driver) {
+  if (isFreeTrialMode()) return true;
   const country = config.getCountry(driver.country);
   return (driver.walletBalance || 0) >= country.minWalletBalance;
 }
@@ -347,6 +360,28 @@ async function listCardFarePayments(driverId) {
   return rows;
 }
 
+// ---------------- Support / safety reports ----------------
+
+async function createSupportReport({ reporterRole, reporterPhone, threadId, message }) {
+  const id = nextId('sup');
+  await pool.query(
+    'INSERT INTO support_reports (id, reporter_role, reporter_phone, thread_id, message, status, ts) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [id, reporterRole, reporterPhone || null, threadId || null, message, 'open', Date.now()]
+  );
+  return { id };
+}
+
+async function listSupportReports(status) {
+  const { rows } = status && status !== 'all'
+    ? await pool.query('SELECT * FROM support_reports WHERE status = $1 ORDER BY ts DESC', [status])
+    : await pool.query('SELECT * FROM support_reports ORDER BY ts DESC');
+  return rows;
+}
+
+async function resolveSupportReport(id) {
+  await pool.query("UPDATE support_reports SET status = 'resolved' WHERE id = $1", [id]);
+}
+
 module.exports = {
   publicDriverView, registerOrResubmit, login,
   signDriverToken, verifyDriverToken, signAdminToken, verifyAdminToken,
@@ -354,5 +389,6 @@ module.exports = {
   walletView, hasSufficientBalance, requestTopup, listPendingTopups, decideTopup, deductCommission,
   createProviderTopup, attachProviderReference, getTopupEntry, findTopupByEntryIdGlobal,
   createCardFarePayment, getCardFarePayment, updateCardFarePayment, listCardFarePayments,
-  COMMISSION_RATE, ADMIN_PASSWORD
+  createSupportReport, listSupportReports, resolveSupportReport,
+  isFreeTrialMode, COMMISSION_RATE, ADMIN_PASSWORD
 };

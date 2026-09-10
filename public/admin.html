@@ -60,6 +60,7 @@
     <div class="section-tabs">
       <button data-section="drivers" class="active">Driver applications</button>
       <button data-section="topups">Wallet top-ups</button>
+      <button data-section="reports">Safety reports</button>
     </div>
 
     <div id="driversSection">
@@ -80,6 +81,13 @@
       <p class="sub">Confirm each top-up only after checking the mobile money transaction actually came through.</p>
       <div id="topupList"></div>
       <div class="empty hidden" id="topupEmpty">No pending top-ups.</div>
+    </div>
+
+    <div id="reportsSection" class="hidden">
+      <h1>Safety reports</h1>
+      <p class="sub">Complaints and safety concerns submitted directly from the app.</p>
+      <div id="reportsList"></div>
+      <div class="empty hidden" id="reportsEmpty">No open reports.</div>
     </div>
   </div>
 </div>
@@ -200,9 +208,43 @@ document.querySelectorAll('.section-tabs button').forEach(b=>{
     const section = b.dataset.section;
     document.getElementById('driversSection').classList.toggle('hidden', section!=='drivers');
     document.getElementById('topupsSection').classList.toggle('hidden', section!=='topups');
+    document.getElementById('reportsSection').classList.toggle('hidden', section!=='reports');
     if (section === 'topups') loadTopups();
+    if (section === 'reports') loadReports();
   };
 });
+
+async function loadReports(){
+  const res = await fetch('/api/admin/support-reports?status=open', { headers:{Authorization:`Bearer ${adminToken}`} });
+  if (res.status === 401){ sessionStorage.removeItem('gofair_admin_token'); show('gate'); return; }
+  const data = await res.json();
+  renderReports(data.reports || []);
+}
+function renderReports(list){
+  const wrap = document.getElementById('reportsList');
+  const empty = document.getElementById('reportsEmpty');
+  wrap.innerHTML = '';
+  empty.classList.toggle('hidden', list.length>0);
+  list.forEach(r=>{
+    const card = document.createElement('div');
+    card.className = 'topup-card';
+    card.innerHTML = `
+      <div>
+        <div class="name">${r.reporter_role === 'driver' ? 'Driver' : 'Rider'}${r.reporter_phone ? ' · ' + escapeHtml(r.reporter_phone) : ''}</div>
+        <div class="topup-ref" style="margin:6px 0;">${escapeHtml(r.message)}</div>
+        <div class="topup-ref">${new Date(Number(r.ts)).toLocaleString()}</div>
+      </div>
+      <div class="actions" style="margin-top:0;">
+        <button class="btn-approve">Mark resolved</button>
+      </div>
+    `;
+    card.querySelector('.btn-approve').onclick = async ()=>{
+      await fetch(`/api/admin/support-reports/${r.id}/resolve`, { method:'POST', headers:{Authorization:`Bearer ${adminToken}`} });
+      loadReports();
+    };
+    wrap.appendChild(card);
+  });
+}
 
 async function loadTopups(){
   const res = await fetch('/api/admin/topups', { headers:{Authorization:`Bearer ${adminToken}`} });

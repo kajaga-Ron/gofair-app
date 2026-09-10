@@ -395,3 +395,104 @@ Two separate features, both card-based:
   same limitation as MTN/Airtel: this sandbox has no network access to
   reach them. Test thoroughly with real sandbox credentials before this
   touches real money.
+
+## Rider/driver experience upgrades
+
+### Fixed: drop-off address autocomplete
+The pickup field's address suggestions worked, but the drop-off field's
+didn't — traced to a CSS `overflow:hidden` on the container holding both
+fields, which was silently clipping the second field's dropdown since it
+needed to extend below the container's edge. Fixed.
+
+### Vehicle details shown to riders
+Drivers now register with a vehicle color alongside plate and model.
+Riders see driver name, vehicle color/model, and plate both while
+reviewing an offer and once matched — the same information Yango/inDrive
+show before a rider gets in a stranger's car.
+
+### Direct calling (tel: links)
+Once matched, either side can tap "Call" to open their phone's native
+dialer with the other party's real number pre-filled. **Worth knowing**:
+this shares actual phone numbers between rider and driver — most large
+platforms mask numbers through a paid calling service (Twilio,
+Africa's Talking) specifically to avoid this. That's a real upgrade to
+consider later, not something faked here.
+
+### In-app chat
+Either side can message the other during a trip, with quick-reply
+buttons ("Where are you?", "I've arrived") plus free typing. Built on
+the same Socket.io connection as everything else — no new
+infrastructure, no message history kept (it's a short-lived per-trip
+channel, not general messaging).
+
+### Safety / customer care
+A "🆘 Safety" button on both rider and driver trip screens offers:
+- **Call support** directly (`SUPPORT_PHONE_NUMBER` env var)
+- **Report an issue** — goes straight into a new admin dashboard tab
+  ("Safety reports"), reviewable and markable as resolved
+
+### Share my trip
+A "📍 Share trip" button generates a link to `/track.html?trip=<id>` —
+a public, no-login-required page a friend or family member can open to
+see the driver's name, vehicle, plate, and coarse trip status (en route
+/ arrived / completed). Deliberately doesn't expose live GPS
+coordinates or exact addresses — just enough for someone to know their
+person is in a known, verified vehicle.
+
+### GPS-based country/currency/map detection
+On load, the app quietly asks for location (never blocking if denied)
+and reverse-geocodes it via Nominatim to detect the country. If it's an
+**active** country (Uganda today), the map re-centers and the currency
+switches automatically — no manual picker needed. If it detects a
+country that exists in the system but isn't launched yet (Zambia,
+Malawi), it tells the person plainly rather than pretending to work
+there. Denied permission, or an unrecognized location, silently falls
+back to Uganda — the app never breaks over this.
+
+### New environment variables
+- `SUPPORT_PHONE_NUMBER` — shown as a tappable "Call support" button
+- `SUPPORT_WHATSAPP_NUMBER` — reserved for a future WhatsApp support link
+
+### Honest limits
+- A handful of cosmetic spots (a few input placeholder texts) still say
+  "UGX" literally rather than reading the detected currency — harmless
+  today since only Uganda is live, worth a final sweep before Zambia or
+  Malawi actually launches.
+- The "share trip" page polls the server every 6 seconds rather than
+  pushing updates instantly — fine at today's scale, could move to a
+  live socket connection if this needs to feel more real-time later.
+- Support reports have no automatic escalation (e.g. SMS to an on-call
+  admin) — someone needs to actually check the admin panel's Safety
+  Reports tab. Worth adding real-time alerting before relying on this
+  for genuine emergencies.
+
+## Free trial mode — waive the minimum wallet balance
+
+For an introductory period, you can let every driver receive ride
+requests regardless of wallet balance — no deposit required to
+participate. This is a single environment variable, so turning it on
+now and off again in a few months needs zero code changes and no
+driver re-registration:
+
+```
+FREE_TRIAL_MODE=true
+```
+
+**Turn it on now** (Render → your service → Environment → add this
+variable). Drivers will see a friendly green banner ("🎉 Free trial
+period — no minimum wallet balance required right now") instead of the
+usual top-up warning, and can bid on rides with a zero balance.
+
+**Turn it off later** by deleting the variable, or setting it to
+`false` — the moment you do, the normal per-country minimum balance
+requirement is back in force immediately, with no other changes needed.
+Tested directly: with the flag on, a driver with a UGX 0 balance
+successfully saw a request and placed a real bid; with it off, the same
+driver was correctly blocked and shown "Top up your wallet before
+accepting rides."
+
+**What this does NOT change**: the 7% commission still applies to
+completed rides during the trial — this only waives the *deposit*
+requirement, not the platform's fee. If you want commission-free too
+during the trial, that's a separate setting (`COMMISSION_RATE=0`) you'd
+set alongside this one.

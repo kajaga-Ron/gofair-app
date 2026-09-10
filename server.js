@@ -40,11 +40,11 @@ app.use(express.static(path.join(__dirname, 'public')));
 // currency/vehicle-type combinations to offer. Adding a country later
 // means adding it to config.js, not touching this route.
 app.get('/api/config/countries', (req, res) => {
-  res.json({ countries: config.publicCountryList(), defaultCountry: config.DEFAULT_COUNTRY });
+  res.json({ countries: config.publicCountryList(), allCountries: config.fullCountryList(), defaultCountry: config.DEFAULT_COUNTRY });
 });
 
 app.post('/api/driver/register', async (req, res) => {
-  const { phone, password, fullName, country, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, documentPhoto, selfie } = req.body || {};
+  const { phone, password, fullName, country, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, documentPhoto, selfie } = req.body || {};
   if (!phone || !password || !fullName || !vehiclePlate || !documentPhoto || !selfie) {
     return res.status(400).json({ error: 'Missing required fields.' });
   }
@@ -55,7 +55,7 @@ app.post('/api/driver/register', async (req, res) => {
     return res.status(400).json({ error: 'Choose a vehicle type (Motorcycle or Car).' });
   }
   try {
-    const result = await drivers.registerOrResubmit({ phone, password, fullName, country, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, documentPhoto, selfie });
+    const result = await drivers.registerOrResubmit({ phone, password, fullName, country, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, documentPhoto, selfie });
     if (result.error) return res.status(400).json({ error: result.error });
     const token = drivers.signDriverToken(result.driver);
     res.json({ token, driver: drivers.publicDriverView(result.driver) });
@@ -148,6 +148,52 @@ app.get('/api/config/topup-numbers', (req, res) => {
     momoName: process.env.ADMIN_MOMO_NAME || null,
     airtelNumber: process.env.ADMIN_AIRTEL_NUMBER || null,
     airtelName: process.env.ADMIN_AIRTEL_NAME || null
+  });
+});
+
+// Support/safety contact — same "just informational" reasoning as the
+// top-up numbers: no auth needed, and it's shown right on the trip
+// screen where someone might need it urgently.
+app.get('/api/config/support', (req, res) => {
+  res.json({
+    phone: process.env.SUPPORT_PHONE_NUMBER || null,
+    whatsapp: process.env.SUPPORT_WHATSAPP_NUMBER || null
+  });
+});
+
+app.post('/api/support/report', async (req, res) => {
+  const { reporterRole, reporterPhone, threadId, message } = req.body || {};
+  if (!['rider', 'driver'].includes(reporterRole) || !message || !message.trim()) {
+    return res.status(400).json({ error: 'Missing report details.' });
+  }
+  const result = await drivers.createSupportReport({ reporterRole, reporterPhone, threadId, message: message.trim().slice(0, 2000) });
+  res.json({ ok: true, id: result.id });
+});
+
+app.get('/api/admin/support-reports', requireAdmin, async (req, res) => {
+  res.json({ reports: await drivers.listSupportReports(req.query.status || 'open') });
+});
+
+app.post('/api/admin/support-reports/:id/resolve', requireAdmin, async (req, res) => {
+  await drivers.resolveSupportReport(req.params.id);
+  res.json({ ok: true });
+});
+
+// Public, read-only trip status for the "share my trip" safety feature —
+// deliberately unauthenticated (a friend/family member opening a shared
+// link has no account) and deliberately minimal: driver identity, vehicle,
+// fare, and coarse status only. No live GPS coordinates are exposed here.
+app.get('/api/trip/:threadId/share', (req, res) => {
+  const t = threads.get(req.params.threadId);
+  if (!t) return res.status(404).json({ error: 'Trip not found or already finished.' });
+  res.json({
+    status: t.status,
+    driverName: t.driverName || null,
+    vehiclePlate: t.vehiclePlate || null,
+    vehicleModel: t.vehicleModel || null,
+    vehicleColor: t.vehicleColor || null,
+    fare: t.finalPrice || null,
+    driverArrived: !!t.driverArrived
   });
 });
 
@@ -384,7 +430,11 @@ function requestPublicView(r) {
   };
 }
 function threadPublicView(t) {
-  return { id: t.id, requestId: t.requestId, driverName: t.driverName, offers: t.offers, status: t.status };
+  return {
+    id: t.id, requestId: t.requestId, driverName: t.driverName,
+    vehiclePlate: t.vehiclePlate, vehicleModel: t.vehicleModel, vehicleColor: t.vehicleColor,
+    offers: t.offers, status: t.status
+  };
 }
 function driverRoom(country, vehicleType) {
   return `driver:${country}:${vehicleType}`;
@@ -527,6 +577,10 @@ io.on('connection', (socket) => {
       driverSocketsByDriverId.set(driver.id, socket.id);
       socket.data.driverId = driver.id;
       socket.data.name = driver.fullName; // use the verified name, not a free-typed one
+      socket.data.phone = driver.phone;
+      socket.data.vehiclePlate = driver.vehiclePlate;
+      socket.data.vehicleModel = driver.vehicleModel;
+      socket.data.vehicleColor = driver.vehicleColor;
       await admitDriverIfEligible(socket.id, driver);
     } else {
       socket.data.name = (name || '').trim() || 'Rider';
@@ -624,7 +678,8 @@ io.on('connection', (socket) => {
 
     const id = nextId('thr');
     const t = {
-      id, requestId, driverSocketId: socket.id, driverName: socket.data.name,
+      id, requestId, driverSocketId: socket.id, driverName: socket.data.name, driverPhone: socket.data.phone,
+      vehiclePlate: socket.data.vehiclePlate, vehicleModel: socket.data.vehicleModel, vehicleColor: socket.data.vehicleColor,
       offers: [{ by: 'driver', price, ts: Date.now() }], status: 'open'
     };
     threads.set(id, t);
@@ -664,11 +719,14 @@ io.on('connection', (socket) => {
     if (driverSocket) t.driverId = driverSocket.data.driverId;
 
     io.to(t.driverSocketId).emit('ride:matched', {
-      threadId, price: finalPrice, role: 'driver', counterpartName: r ? r.riderName : 'Rider'
+      threadId, price: finalPrice, role: 'driver', counterpartName: r ? r.riderName : 'Rider',
+      counterpartPhone: r ? r.riderPhone : null
     });
     if (r) {
       io.to(r.riderSocketId).emit('ride:matched', {
-        threadId, price: finalPrice, role: 'rider', counterpartName: t.driverName
+        threadId, price: finalPrice, role: 'rider', counterpartName: t.driverName,
+        counterpartPhone: t.driverPhone,
+        vehiclePlate: t.vehiclePlate, vehicleModel: t.vehicleModel, vehicleColor: t.vehicleColor
       });
       for (const [tid2, t2] of threads) {
         if (t2.requestId === r.id && tid2 !== threadId && t2.status === 'open') {
@@ -702,6 +760,23 @@ io.on('connection', (socket) => {
   // Driver marks that they've physically reached the pickup point — this
   // is the trigger that determines whether a later cancellation is "free"
   // or earns the rider a fine on their next fare suggestion.
+  // Simple in-trip chat — either side can message the other once matched.
+  // Deliberately minimal: no history persistence, since this is a
+  // short-lived per-trip channel, not a general messaging feature.
+  socket.on('chat:send', ({ threadId, text }) => {
+    const t = threads.get(threadId);
+    if (!t || !text || !text.trim()) return;
+    const trimmed = text.trim().slice(0, 500); // basic length guard
+    let from;
+    if (t.driverSocketId === socket.id) from = 'driver';
+    else if (t.riderSocketId === socket.id) from = 'rider';
+    else return; // not a participant in this thread
+
+    const payload = { threadId, from, text: trimmed, ts: Date.now() };
+    if (from === 'driver' && t.riderSocketId) io.to(t.riderSocketId).emit('chat:message', payload);
+    if (from === 'rider' && t.driverSocketId) io.to(t.driverSocketId).emit('chat:message', payload);
+  });
+
   socket.on('trip:arrived', ({ threadId }) => {
     const t = threads.get(threadId);
     if (!t || t.status !== 'accepted' || t.driverSocketId !== socket.id) return;

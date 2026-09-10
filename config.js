@@ -17,6 +17,7 @@ const COUNTRIES = {
     flag: '🇺🇬',
     dialPrefix: '256',
     minWalletBalance: 5000,
+    mapCenter: [0.3476, 32.5825], // Kampala
     rates: {
       motorcycle: { base: 1000, perKm: 700 },
       car: { base: 2000, perKm: 1300 }
@@ -28,6 +29,7 @@ const COUNTRIES = {
     flag: '🇿🇲',
     dialPrefix: '260',
     minWalletBalance: 50,
+    mapCenter: [-15.3875, 28.3228], // Lusaka
     rates: {
       motorcycle: { base: 15, perKm: 8 },
       car: { base: 25, perKm: 15 }
@@ -39,6 +41,7 @@ const COUNTRIES = {
     flag: '🇲🇼',
     dialPrefix: '265',
     minWalletBalance: 5000,
+    mapCenter: [-13.9626, 33.7741], // Lilongwe
     rates: {
       motorcycle: { base: 1500, perKm: 900 },
       car: { base: 2500, perKm: 1600 }
@@ -60,8 +63,17 @@ function getCountry(code) {
 }
 function publicCountryList() {
   return ACTIVE_COUNTRIES.map(code => ({
-    code, name: COUNTRIES[code].name, currency: COUNTRIES[code].currency, flag: COUNTRIES[code].flag
+    code, name: COUNTRIES[code].name, currency: COUNTRIES[code].currency, flag: COUNTRIES[code].flag, mapCenter: COUNTRIES[code].mapCenter
+  }));
+}
+// Includes countries that exist in config but aren't launched yet — used
+// so the app can tell "we don't operate here yet" apart from "we've
+// never heard of this country," when detecting location via GPS.
+function fullCountryList() {
+  return Object.keys(COUNTRIES).map(code => ({
+    code, name: COUNTRIES[code].name, currency: COUNTRIES[code].currency, flag: COUNTRIES[code].flag,
+    mapCenter: COUNTRIES[code].mapCenter, active: ACTIVE_COUNTRIES.includes(code)
   }));
 }
 
-module.exports = { COUNTRIES, DEFAULT_COUNTRY, ACTIVE_COUNTRIES, isValidCountry, getCountry, publicCountryList };
+module.exports = { COUNTRIES, DEFAULT_COUNTRY, ACTIVE_COUNTRIES, isValidCountry, getCountry, publicCountryList, fullCountryList };
