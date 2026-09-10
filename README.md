@@ -496,3 +496,93 @@ completed rides during the trial — this only waives the *deposit*
 requirement, not the platform's fee. If you want commission-free too
 during the trial, that's a separate setting (`COMMISSION_RATE=0`) you'd
 set alongside this one.
+
+## Fixed: currency now follows the pickup point, not the rider's device
+
+Originally, country/currency detection ran once at page load based on the
+rider's own device location — meaning someone in Malawi arranging a ride
+for someone standing in Zambia would incorrectly see Uganda's currency
+the whole time, since their *own* location never changed.
+
+Fixed: the country is now re-detected every time a pickup point is set
+(map tap or address search), using the pickup's coordinates specifically
+— not the device's. The device-location guess still runs once on load,
+but only as an initial default before any pickup is chosen; the moment a
+real pickup point is set, that takes over as the source of truth.
+
+**Honest limitation**: this sandbox has no network access to
+nominatim.openstreetmap.org (same restriction noted elsewhere for
+MTN/Airtel/Flutterwave), so the live reverse-geocode call itself
+couldn't be tested end-to-end here — only the matching/active-country
+logic that runs after it, which was confirmed directly against the
+server's own config. Since this reuses the same Nominatim service
+already working for address search, it should behave the same way, but
+test it for real on your end before relying on it.
+
+## Added: Botswana and Zimbabwe (config only — not live yet)
+
+Following the same pattern as Zambia and Malawi: both countries now
+exist in `config.js` with currency, map center, and placeholder fare
+rates, but neither is switched on (`ACTIVE_COUNTRIES` is still just
+`['UG']`). They won't appear as a choice in the app, and GPS/pickup
+detection will correctly tell a rider "GoFair isn't available here yet"
+if their pickup point lands in either — same honest behavior as Zambia.
+
+### A real decision worth confirming: Zimbabwe's currency
+Zimbabwe officially uses the **ZiG** (Zimbabwe Gold, introduced April
+2024), but as of recent reporting roughly **70% of actual transactions**
+in the country are still denominated in **US dollars** — hotels, fuel,
+restaurants, and most day-to-day commerce quote and settle in USD, with
+ZiG mostly showing up as change. I set the config to `USD` for that
+reason, but this is genuinely worth confirming before real money moves
+through it — if you'd rather follow the official currency instead,
+change `currency: 'USD'` to `currency: 'ZWG'` in `config.js`.
+
+### Fare rates are placeholders, not researched pricing
+Same caveat as Zambia/Malawi: the per-km rates for both new countries
+are structurally reasonable guesses, not real local market research.
+Also worth flagging specifically for **Botswana**: motorcycle-taxi
+culture is far less established there than in Uganda — worth confirming
+riders would even want that option before launch, rather than assuming
+the same two-vehicle-type model transfers directly.
+
+### To actually launch either one later
+1. Replace the placeholder `rates` for that country in `config.js` with
+   real researched local pricing
+2. Confirm the currency choice (see Zimbabwe note above)
+3. Add its code to `ACTIVE_COUNTRIES` — e.g. `['UG', 'ZW']`
+4. Redeploy — no other code changes needed anywhere in the app
+
+## Launched: Zambia and Malawi are now live alongside Uganda
+
+`ACTIVE_COUNTRIES` is now `['UG', 'ZM', 'MW']`. Before flipping this on,
+the placeholder rates for both were replaced with numbers calibrated
+against real published pricing:
+
+- **Zambia**: Yango's own Lusaka pricing page cites fares starting
+  around $2/km for short trips (tapering for longer ones), with typical
+  short rides costing $1.50-3 total, at roughly 25 ZMW/USD. GoFair's
+  linear pricing formula doesn't taper the way Yango's does, so long
+  trips here will price somewhat higher than Yango's own app — worth
+  watching once real rides happen.
+- **Malawi**: recalibrated against a published Blantyre taxi rate of
+  roughly MWK 200/km. The original placeholder here was **5-8x too
+  high** — exactly why these got checked against real reference points
+  before real drivers and riders started seeing these numbers.
+
+### Tested specifically for this launch
+With three countries live simultaneously for the first time, I tested
+that they stay properly isolated from each other — confirmed a ride
+request posted in Zambia reaches a Zambia-registered driver and does
+NOT leak to a Uganda-registered driver, even though both are now
+connected to the same live app at the same time.
+
+### Still worth confirming before real volume
+- **Motorcycle-taxi culture isn't well documented in Zambia or Malawi**
+  the way it is in Uganda — the motorcycle rates exist for consistency,
+  but it's worth confirming riders and drivers in these markets
+  actually want that option before assuming it transfers directly.
+- These rates come from public pricing pages and blog posts, not a live
+  pull from either competitor's current app — treat them as a
+  well-informed starting point, not a guarantee, and adjust quickly if
+  real trips feel mispriced in either direction.

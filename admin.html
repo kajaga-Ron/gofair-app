@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GoFair — Driver Review</title>
+<style>
+  :root{ --asphalt:#1C1F26; --paper:#F7F4EE; --paper-dim:#EAE6DC; --amber:#F2A93B; --teal:#2F7A5E; --rust:#C1442B; --ink:#1C1F26; --ink-soft:#6B6F76; --line:rgba(28,31,38,0.12); }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--paper-dim);color:var(--ink);}
+  .wrap{max-width:900px;margin:0 auto;padding:28px 20px 60px;}
+  h1{font-size:20px;font-weight:800;margin:0 0 4px;}
+  .sub{color:var(--ink-soft);font-size:13.5px;margin:0 0 24px;}
+  .gate{max-width:340px;margin:80px auto;background:#fff;border-radius:14px;padding:28px;border:1px solid var(--line);}
+  .gate input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:14px;margin-bottom:10px;font-family:inherit;}
+  .gate button, .tabs button{cursor:pointer;font-family:inherit;}
+  .gate button{width:100%;padding:11px;border:none;border-radius:10px;background:var(--asphalt);color:var(--paper);font-weight:700;font-size:14px;}
+  .err{color:var(--rust);font-size:12.5px;margin:-4px 0 10px;}
+  .tabs{display:flex;gap:8px;margin-bottom:18px;}
+  .tabs button{border:1px solid var(--line);background:#fff;padding:8px 14px;border-radius:999px;font-size:13px;font-weight:600;color:var(--ink-soft);}
+  .tabs button.active{background:var(--asphalt);color:var(--paper);border-color:var(--asphalt);}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px;}
+  .card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;}
+  .name{font-weight:800;font-size:16px;}
+  .meta{font-size:12.5px;color:var(--ink-soft);margin-top:2px;}
+  .badge{font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px;text-transform:uppercase;letter-spacing:0.03em;}
+  .badge.pending{background:#FCE8C7;color:#8A5A0D;}
+  .badge.approved{background:#D9EFE3;color:var(--teal);}
+  .badge.rejected{background:#F6D9D2;color:var(--rust);}
+  .docs{display:flex;gap:10px;margin:14px 0;flex-wrap:wrap;}
+  .doc{text-align:center;}
+  .doc img{width:110px;height:80px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:#f0f0f0;}
+  .doc span{display:block;font-size:10.5px;color:var(--ink-soft);margin-top:4px;}
+  .fields{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;font-size:13px;margin-bottom:6px;}
+  .fields div b{font-weight:700;}
+  .review-note{font-size:12.5px;color:var(--ink-soft);font-style:italic;margin-top:8px;}
+  .actions{display:flex;gap:10px;margin-top:14px;}
+  .actions button{flex:1;padding:10px;border-radius:10px;border:none;font-weight:700;font-size:13.5px;}
+  .btn-approve{background:var(--teal);color:#fff;}
+  .btn-reject{background:transparent;border:1.5px solid var(--rust) !important;color:var(--rust);}
+  .empty{text-align:center;color:var(--ink-soft);padding:40px 10px;font-size:14px;}
+  .section-tabs{display:flex;gap:10px;margin-bottom:22px;border-bottom:1px solid var(--line);}
+  .section-tabs button{border:none;background:transparent;padding:10px 4px;font-size:14px;font-weight:700;color:var(--ink-soft);cursor:pointer;font-family:inherit;border-bottom:2px solid transparent;margin-bottom:-1px;}
+  .section-tabs button.active{color:var(--ink);border-bottom-color:var(--asphalt);}
+  .topup-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
+  .topup-amount{font-weight:800;font-size:19px;font-variant-numeric:tabular-nums;}
+  .topup-ref{font-size:12px;color:var(--ink-soft);margin-top:2px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="gateView" class="gate">
+    <h1 style="margin-bottom:14px;">Driver review</h1>
+    <input id="pw" type="password" placeholder="Admin password">
+    <div class="err hidden" id="gateErr"></div>
+    <button id="btnLogin">Sign in</button>
+  </div>
+
+  <div id="mainView" class="hidden">
+    <div class="section-tabs">
+      <button data-section="drivers" class="active">Driver applications</button>
+      <button data-section="topups">Wallet top-ups</button>
+      <button data-section="reports">Safety reports</button>
+    </div>
+
+    <div id="driversSection">
+      <h1>Driver applications</h1>
+      <p class="sub">Review submitted documents before a driver can see or bid on ride requests.</p>
+      <div class="tabs">
+        <button data-status="pending" class="active">Pending</button>
+        <button data-status="approved">Approved</button>
+        <button data-status="rejected">Rejected</button>
+        <button data-status="all">All</button>
+      </div>
+      <div id="list"></div>
+      <div class="empty hidden" id="empty">No applications in this category.</div>
+    </div>
+
+    <div id="topupsSection" class="hidden">
+      <h1>Wallet top-ups</h1>
+      <p class="sub">Confirm each top-up only after checking the mobile money transaction actually came through.</p>
+      <div id="topupList"></div>
+      <div class="empty hidden" id="topupEmpty">No pending top-ups.</div>
+    </div>
+
+    <div id="reportsSection" class="hidden">
+      <h1>Safety reports</h1>
+      <p class="sub">Complaints and safety concerns submitted directly from the app.</p>
+      <div id="reportsList"></div>
+      <div class="empty hidden" id="reportsEmpty">No open reports.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+let adminToken = sessionStorage.getItem('gofair_admin_token') || '';
+let currentStatus = 'pending';
+
+function show(view){
+  document.getElementById('gateView').classList.toggle('hidden', view!=='gate');
+  document.getElementById('mainView').classList.toggle('hidden', view!=='main');
+}
+
+async function login(){
+  const pw = document.getElementById('pw').value;
+  const res = await fetch('/api/admin/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:pw})});
+  const data = await res.json();
+  if (!res.ok){ document.getElementById('gateErr').textContent = data.error; document.getElementById('gateErr').classList.remove('hidden'); return; }
+  adminToken = data.token;
+  sessionStorage.setItem('gofair_admin_token', adminToken);
+  show('main');
+  loadList();
+}
+document.getElementById('btnLogin').onclick = login;
+document.getElementById('pw').addEventListener('keydown', e=>{ if(e.key==='Enter') login(); });
+
+document.querySelectorAll('.tabs button').forEach(b=>{
+  b.onclick = ()=>{
+    document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    currentStatus = b.dataset.status;
+    loadList();
+  };
+});
+
+async function loadList(){
+  const res = await fetch(`/api/admin/drivers?status=${currentStatus}`, { headers:{Authorization:`Bearer ${adminToken}`} });
+  if (res.status === 401){ sessionStorage.removeItem('gofair_admin_token'); show('gate'); return; }
+  const data = await res.json();
+  render(data.drivers || []);
+}
+
+function render(list){
+  const wrap = document.getElementById('list');
+  const empty = document.getElementById('empty');
+  wrap.innerHTML = '';
+  empty.classList.toggle('hidden', list.length>0);
+  list.forEach(d=>{
+    const card = document.createElement('div');
+    card.className = 'card';
+    const submitted = new Date(d.submittedAt).toLocaleString();
+    card.innerHTML = `
+      <div class="card-top">
+        <div>
+          <div class="name">${escapeHtml(d.fullName)}</div>
+          <div class="meta">${escapeHtml(d.phone)} · applied ${submitted}</div>
+        </div>
+        <span class="badge ${d.status}">${d.status}</span>
+      </div>
+      <div class="fields">
+        <div><b>ID type:</b> ${d.documentType === 'national_id' ? 'National ID' : 'Driving Permit / Licence'}</div>
+        <div><b>ID number:</b> ${escapeHtml(d.documentNumber)}</div>
+        <div><b>Vehicle plate:</b> ${escapeHtml(d.vehiclePlate)}</div>
+        <div><b>Vehicle model:</b> ${escapeHtml(d.vehicleModel || '—')}</div>
+      </div>
+      <div class="docs">
+        <div class="doc"><img class="doc-img" data-driver-id="${d.id}" data-field="document" onerror="this.style.opacity=0.2"><span>${d.documentType === 'national_id' ? 'National ID' : 'Driving Permit'}</span></div>
+        <div class="doc"><img class="doc-img" data-driver-id="${d.id}" data-field="selfie" onerror="this.style.opacity=0.2"><span>Selfie</span></div>
+      </div>
+      ${d.reviewNote ? `<div class="review-note">Note: ${escapeHtml(d.reviewNote)}</div>` : ''}
+      ${d.status==='pending' ? `
+      <div class="actions">
+        <button class="btn-approve">Approve</button>
+        <button class="btn-reject">Reject</button>
+      </div>` : ''}
+    `;
+    if (d.status === 'pending'){
+      card.querySelector('.btn-approve').onclick = ()=> decide(d.id, 'approve');
+      card.querySelector('.btn-reject').onclick = ()=>{
+        const note = prompt('Reason for rejecting this application (shown to the driver):', 'Documents unclear — please resubmit clear photos.');
+        if (note === null) return;
+        decide(d.id, 'reject', note);
+      };
+    }
+    wrap.appendChild(card);
+    card.querySelectorAll('.doc-img').forEach(loadDocImage);
+  });
+}
+
+async function loadDocImage(img){
+  try{
+    const res = await fetch(`/api/admin/drivers/${img.dataset.driverId}/document/${img.dataset.field}`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    if (!res.ok) throw new Error('not found');
+    const blob = await res.blob();
+    img.src = URL.createObjectURL(blob);
+  }catch(e){
+    img.style.opacity = 0.2;
+  }
+}
+
+async function decide(id, action, note){
+  const res = await fetch(`/api/admin/drivers/${id}/${action}`, {
+    method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${adminToken}`},
+    body: JSON.stringify({ note })
+  });
+  if (!res.ok){ alert('Action failed — your session may have expired.'); return; }
+  loadList();
+}
+
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+document.querySelectorAll('.section-tabs button').forEach(b=>{
+  b.onclick = ()=>{
+    document.querySelectorAll('.section-tabs button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    const section = b.dataset.section;
+    document.getElementById('driversSection').classList.toggle('hidden', section!=='drivers');
+    document.getElementById('topupsSection').classList.toggle('hidden', section!=='topups');
+    document.getElementById('reportsSection').classList.toggle('hidden', section!=='reports');
+    if (section === 'topups') loadTopups();
+    if (section === 'reports') loadReports();
+  };
+});
+
+async function loadReports(){
+  const res = await fetch('/api/admin/support-reports?status=open', { headers:{Authorization:`Bearer ${adminToken}`} });
+  if (res.status === 401){ sessionStorage.removeItem('gofair_admin_token'); show('gate'); return; }
+  const data = await res.json();
+  renderReports(data.reports || []);
+}
+function renderReports(list){
+  const wrap = document.getElementById('reportsList');
+  const empty = document.getElementById('reportsEmpty');
+  wrap.innerHTML = '';
+  empty.classList.toggle('hidden', list.length>0);
+  list.forEach(r=>{
+    const card = document.createElement('div');
+    card.className = 'topup-card';
+    card.innerHTML = `
+      <div>
+        <div class="name">${r.reporter_role === 'driver' ? 'Driver' : 'Rider'}${r.reporter_phone ? ' · ' + escapeHtml(r.reporter_phone) : ''}</div>
+        <div class="topup-ref" style="margin:6px 0;">${escapeHtml(r.message)}</div>
+        <div class="topup-ref">${new Date(Number(r.ts)).toLocaleString()}</div>
+      </div>
+      <div class="actions" style="margin-top:0;">
+        <button class="btn-approve">Mark resolved</button>
+      </div>
+    `;
+    card.querySelector('.btn-approve').onclick = async ()=>{
+      await fetch(`/api/admin/support-reports/${r.id}/resolve`, { method:'POST', headers:{Authorization:`Bearer ${adminToken}`} });
+      loadReports();
+    };
+    wrap.appendChild(card);
+  });
+}
+
+async function loadTopups(){
+  const res = await fetch('/api/admin/topups', { headers:{Authorization:`Bearer ${adminToken}`} });
+  if (res.status === 401){ sessionStorage.removeItem('gofair_admin_token'); show('gate'); return; }
+  const data = await res.json();
+  renderTopups(data.topups || []);
+}
+
+function renderTopups(list){
+  const wrap = document.getElementById('topupList');
+  const empty = document.getElementById('topupEmpty');
+  wrap.innerHTML = '';
+  empty.classList.toggle('hidden', list.length>0);
+  list.forEach(t=>{
+    const card = document.createElement('div');
+    card.className = 'topup-card';
+    card.innerHTML = `
+      <div>
+        <div class="name">${escapeHtml(t.driverName)} · ${escapeHtml(t.driverPhone)}</div>
+        <div class="topup-amount">UGX ${Number(t.amount).toLocaleString()}</div>
+        <div class="topup-ref">Ref: ${escapeHtml(t.momoRef || '—')} · ${new Date(t.ts).toLocaleString()}</div>
+      </div>
+      <div class="actions" style="margin-top:0;">
+        <button class="btn-approve">Confirm</button>
+        <button class="btn-reject">Reject</button>
+      </div>
+    `;
+    card.querySelector('.btn-approve').onclick = ()=> decideTopup(t.driverId, t.id, 'confirm');
+    card.querySelector('.btn-reject').onclick = ()=>{
+      const note = prompt('Reason for rejecting this top-up:', 'Could not find a matching transaction.');
+      if (note === null) return;
+      decideTopup(t.driverId, t.id, 'reject', note);
+    };
+    wrap.appendChild(card);
+  });
+}
+
+async function decideTopup(driverId, topupId, action, note){
+  const res = await fetch(`/api/admin/topups/${driverId}/${topupId}/${action}`, {
+    method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${adminToken}`},
+    body: JSON.stringify({ note })
+  });
+  if (!res.ok){ alert('Action failed — your session may have expired.'); return; }
+  loadTopups();
+}
+
+if (adminToken){ show('main'); loadList(); } else { show('gate'); }
+</script>
+</body>
+</html>

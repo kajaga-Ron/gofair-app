@@ -1,0 +1,1354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>GoFair — Name your price</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root{
+    --asphalt:#1C1F26; --asphalt-2:#262A33; --paper:#F7F4EE; --paper-dim:#EAE6DC;
+    --amber:#F2A93B; --amber-deep:#C77F16; --teal:#2F7A5E; --rust:#C1442B;
+    --ink:#1C1F26; --ink-soft:#6B6F76; --line:rgba(28,31,38,0.12); --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--asphalt);color:var(--ink);overscroll-behavior:none;}
+  #app{position:relative;width:100%;height:100vh;height:100dvh;max-width:480px;margin:0 auto;overflow:hidden;background:var(--paper);box-shadow:0 0 40px rgba(0,0,0,0.4);}
+  .topbar{position:absolute;top:0;left:0;right:0;z-index:500;display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:linear-gradient(to bottom, rgba(28,31,38,0.85), rgba(28,31,38,0));pointer-events:none;}
+  .brand{display:flex;flex-direction:column;pointer-events:auto;}
+  .brand-mark{font-size:19px;font-weight:800;color:var(--paper);letter-spacing:-0.02em;}
+  .brand-mark span{color:var(--amber);}
+  .conn-state{font-size:10.5px;font-weight:600;color:rgba(247,244,238,0.7);margin-top:1px;}
+  .conn-state.live::before{content:"●";color:#5CD68A;margin-right:4px;}
+  .conn-state.down::before{content:"●";color:var(--rust);margin-right:4px;}
+  .mode-switch{pointer-events:auto;display:flex;background:rgba(255,255,255,0.14);border-radius:999px;padding:3px;backdrop-filter:blur(6px);}
+  .mode-switch button{border:none;background:transparent;color:var(--paper);font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:999px;cursor:pointer;transition:background .18s ease;}
+  .mode-switch button.active{background:var(--amber);color:var(--asphalt);}
+  #map{position:absolute;inset:0;filter:saturate(0.9);}
+  .pin-label{background:var(--asphalt);color:var(--paper);font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);}
+  .pin-label.drop{background:var(--rust);} .pin-label.driver{background:var(--teal);}
+  .locate-btn{position:absolute;right:14px;z-index:400;width:42px;height:42px;border-radius:50%;background:var(--paper);border:1px solid var(--line);box-shadow:0 3px 10px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;}
+  .sheet{position:absolute;left:0;right:0;bottom:0;z-index:600;background:var(--paper);border-radius:20px 20px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,0.25);padding:10px 18px calc(18px + env(safe-area-inset-bottom));max-height:72vh;overflow-y:auto;}
+  .sheet-handle{width:36px;height:4px;background:var(--paper-dim);border-radius:99px;margin:2px auto 12px;}
+  .sheet h2{margin:0 0 2px;font-size:17px;font-weight:800;letter-spacing:-0.01em;}
+  .sheet .sub{margin:0 0 14px;color:var(--ink-soft);font-size:13px;}
+  .field-stack{border:1px solid var(--line);border-radius:12px;overflow:visible;background:#fff;}
+  .field{display:flex;align-items:center;gap:10px;padding:12px 14px;position:relative;}
+  .field + .field{border-top:1px solid var(--line);}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none;}
+  .dot.pickup{background:var(--teal);} .dot.drop{background:var(--rust);}
+  .field input{border:none;outline:none;font-size:14.5px;flex:1;font-family:inherit;background:transparent;color:var(--ink);}
+  .field input::placeholder{color:#A9ABB1;}
+  .suggest-list{position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid var(--line);border-top:none;max-height:160px;overflow-y:auto;z-index:20;box-shadow:0 8px 16px rgba(0,0,0,0.08);}
+  .suggest-list div{padding:10px 14px;font-size:13.5px;cursor:pointer;border-bottom:1px solid var(--line);}
+  .suggest-list div:last-child{border-bottom:none;} .suggest-list div:hover{background:var(--paper-dim);}
+  .fare-row{display:flex;align-items:center;gap:12px;margin-top:14px;}
+  .vehicle-toggle{display:flex;gap:8px;margin-bottom:12px;}
+  .vtype-btn{flex:1;border:1.5px solid var(--line);background:#fff;border-radius:12px;padding:10px;font-size:13.5px;font-weight:700;color:var(--ink-soft);cursor:pointer;font-family:inherit;}
+  .vtype-btn.active{border-color:var(--asphalt);background:var(--asphalt);color:var(--paper);}
+  .fare-input-wrap{flex:1;display:flex;align-items:center;gap:6px;border:1.5px solid var(--asphalt);border-radius:12px;padding:10px 14px;background:#fff;}
+  .fare-input-wrap .cur{font-weight:700;color:var(--ink-soft);font-size:14px;}
+  .fare-input-wrap input{border:none;outline:none;font-size:20px;font-weight:800;width:100%;font-variant-numeric:tabular-nums;font-family:inherit;color:var(--ink);background:transparent;}
+  .suggested-fare{font-size:11.5px;color:var(--ink-soft);margin-top:6px;}
+  .btn{display:block;width:100%;text-align:center;border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;margin-top:14px;font-family:inherit;letter-spacing:-0.01em;transition:transform .12s ease, filter .12s ease;}
+  .btn:active{transform:scale(0.98);}
+  .btn-primary{background:var(--amber);color:var(--asphalt);}
+  .btn-primary:disabled{background:var(--paper-dim);color:#B3B0A6;cursor:not-allowed;}
+  .btn-outline{background:transparent;border:1.5px solid var(--line);color:var(--ink);}
+  .btn-danger{background:transparent;color:var(--rust);}
+  .searching{text-align:center;padding:10px 0 4px;}
+  .pulse-ring{width:56px;height:56px;border-radius:50%;border:3px solid var(--amber);margin:0 auto 14px;position:relative;}
+  .pulse-ring::after{content:"";position:absolute;inset:-3px;border-radius:50%;border:3px solid var(--amber);opacity:0.6;animation:pulse 1.4s ease-out infinite;}
+  @keyframes pulse{0%{transform:scale(1);opacity:0.6;}100%{transform:scale(1.9);opacity:0;}}
+  .searching .fare-shown{font-size:26px;font-weight:800;margin:10px 0 2px;font-variant-numeric:tabular-nums;}
+  .thread-card{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;background:#fff;}
+  .thread-top{display:flex;align-items:center;gap:10px;}
+  .avatar{width:38px;height:38px;border-radius:50%;background:var(--asphalt-2);color:var(--paper);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex:none;}
+  .thread-name{font-weight:700;font-size:14px;flex:1;}
+  .vehicle-line{font-weight:500;font-size:11.5px;color:var(--ink-soft);margin-top:1px;}
+  .contact-row{display:flex;gap:6px;margin-top:12px;}
+  .contact-btn{flex:1;font-size:12px;padding:9px 4px;margin-top:0;text-align:center;text-decoration:none;}
+  .chat-panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;margin-top:10px;}
+  .chat-quick-replies{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;}
+  .chip-btn{border:1px solid var(--line);background:var(--paper-dim);border-radius:999px;padding:6px 10px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit;color:var(--ink);}
+  .chat-messages{max-height:140px;overflow-y:auto;margin-bottom:8px;display:flex;flex-direction:column;gap:6px;}
+  .chat-bubble{max-width:80%;padding:7px 11px;border-radius:12px;font-size:13px;line-height:1.4;}
+  .chat-bubble.mine{align-self:flex-end;background:var(--asphalt);color:var(--paper);}
+  .chat-bubble.theirs{align-self:flex-start;background:var(--paper-dim);color:var(--ink);}
+  .chat-input-row{display:flex;gap:6px;}
+  .chat-input-row input{flex:1;border:1px solid var(--line);border-radius:10px;padding:9px 10px;font-size:13.5px;font-family:inherit;}
+  .thread-status{font-size:11px;color:var(--ink-soft);font-weight:600;}
+  .offer-trail{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0;}
+  .offer-chip{font-size:11.5px;padding:4px 9px;border-radius:999px;background:var(--paper-dim);font-variant-numeric:tabular-nums;}
+  .offer-chip.mine{background:var(--asphalt);color:var(--paper);}
+  .latest-price{font-weight:800;font-size:19px;font-variant-numeric:tabular-nums;margin-top:2px;}
+  .thread-actions{display:flex;gap:8px;margin-top:10px;}
+  .thread-actions .btn{margin-top:0;flex:1;padding:10px;font-size:13px;}
+  .counter-row{display:flex;gap:8px;margin-top:8px;}
+  .counter-row input{flex:1;border:1px solid var(--line);border-radius:10px;padding:9px 10px;font-size:14px;font-family:inherit;font-variant-numeric:tabular-nums;}
+  .waiting-note{font-size:12px;color:var(--ink-soft);font-style:italic;margin-top:8px;}
+  .threads-scroll{max-height:38vh;overflow-y:auto;margin-top:12px;padding-right:2px;}
+  .status-row{display:flex;align-items:center;gap:12px;padding:10px 0 14px;border-bottom:1px solid var(--line);margin-bottom:14px;}
+  .status-row .avatar{width:50px;height:50px;font-size:17px;}
+  .status-title{font-weight:800;font-size:16px;}
+  .status-sub{font-size:12.5px;color:var(--ink-soft);margin-top:2px;}
+  .eta-chip{margin-left:auto;background:var(--asphalt);color:var(--paper);padding:6px 12px;border-radius:999px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;flex:none;}
+  .trip-steps{font-size:13px;color:var(--ink-soft);line-height:1.7;}
+  .trip-steps b{color:var(--ink);}
+  .empty-note{text-align:center;color:var(--ink-soft);font-size:13px;padding:20px 10px;}
+  .req-card{border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:10px;background:#fff;}
+  .req-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+  .req-route{font-size:13.5px;font-weight:600;line-height:1.5;}
+  .req-route .to{color:var(--ink-soft);font-weight:500;}
+  .req-price{font-weight:800;font-size:19px;color:var(--teal);font-variant-numeric:tabular-nums;flex:none;}
+  .req-dist{font-size:11.5px;color:var(--ink-soft);margin-top:4px;}
+  .req-actions{display:flex;gap:8px;margin-top:10px;}
+  .req-actions .btn{margin-top:0;flex:1;padding:9px;font-size:13px;}
+  .toast{position:absolute;left:50%;top:70px;transform:translateX(-50%);background:var(--asphalt);color:var(--paper);padding:10px 18px;border-radius:999px;font-size:13px;font-weight:600;z-index:900;box-shadow:0 4px 14px rgba(0,0,0,0.3);opacity:0;pointer-events:none;transition:opacity .25s ease, transform .25s ease;max-width:85%;text-align:center;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(4px);}
+  ::-webkit-scrollbar{width:5px;} ::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px;}
+  .hidden{display:none !important;}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="map"></div>
+
+  <div class="topbar">
+    <div class="brand">
+      <span class="brand-mark">Go<span>Fair</span></span>
+      <span class="conn-state down" id="connState">connecting…</span>
+    </div>
+    <div class="mode-switch">
+      <button id="btnRiderMode" class="active">Rider</button>
+      <button id="btnDriverMode">Driver</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <div class="locate-btn" id="locateBtn" style="bottom:calc(38vh + 14px);">◎</div>
+
+  <!-- ============ RIDER SHEET ============ -->
+  <div class="sheet" id="riderSheet">
+    <div class="sheet-handle"></div>
+
+    <div id="stepPlan">
+      <h2>Where to?</h2>
+      <p class="sub">Tap the map to drop pins, or search below.</p>
+      <div class="vehicle-toggle">
+        <button class="vtype-btn active" data-type="motorcycle">🏍 Motorcycle</button>
+        <button class="vtype-btn" data-type="car">🚗 Car</button>
+      </div>
+      <div class="field-stack">
+        <div class="field">
+          <span class="dot pickup"></span>
+          <input id="pickupInput" placeholder="Pickup location" autocomplete="off">
+          <div class="suggest-list hidden" id="suggestPickup"></div>
+        </div>
+        <div class="field">
+          <span class="dot drop"></span>
+          <input id="dropInput" placeholder="Where are you going?" autocomplete="off">
+          <div class="suggest-list hidden" id="suggestDrop"></div>
+        </div>
+      </div>
+      <div class="fare-row">
+        <div class="fare-input-wrap">
+          <span class="cur">UGX</span>
+          <input id="fareInput" type="number" inputmode="numeric" placeholder="0" min="0" step="500">
+        </div>
+      </div>
+      <div class="suggested-fare" id="suggestedFareNote">Set both points to see a suggested fare.</div>
+      <button class="btn btn-primary" id="btnRequest" disabled>Propose this fare</button>
+    </div>
+
+    <div id="stepSearching" class="hidden">
+      <div class="searching">
+        <div class="pulse-ring"></div>
+        <h2>Waiting for drivers to respond</h2>
+        <p class="sub">Pickup: <span id="searchPickupName"></span></p>
+        <div class="fare-shown" id="searchFareShown"></div>
+      </div>
+      <button class="btn btn-outline" id="btnCancelSearch">Cancel request</button>
+    </div>
+
+    <div id="stepBids" class="hidden">
+      <h2>Offers on your ride</h2>
+      <p class="sub">Accept, counter, or wait for more drivers.</p>
+      <div class="threads-scroll" id="threadsList"></div>
+      <button class="btn btn-danger" id="btnCancelBids">Cancel request</button>
+    </div>
+
+    <div id="stepTrip" class="hidden">
+      <div class="status-row">
+        <div class="avatar" id="tripAvatar">–</div>
+        <div><div class="status-title" id="tripDriverName">–</div><div class="status-sub" id="tripCarInfo">Fare agreed at <span id="tripFareVal"></span></div></div>
+        <div class="eta-chip" id="tripEta">on the way</div>
+      </div>
+      <div class="contact-row">
+        <a class="btn btn-outline contact-btn" id="btnCallDriver" href="#">📞 Call driver</a>
+        <button class="btn btn-outline contact-btn" id="btnMessageDriver">💬 Message</button>
+        <button class="btn btn-outline contact-btn" id="btnShareTripRider">📍 Share trip</button>
+        <button class="btn btn-outline contact-btn" id="btnSafetyRider" style="border-color:var(--rust);color:var(--rust);">🆘 Safety</button>
+      </div>
+      <div id="riderSafetyPanel" class="chat-panel hidden">
+        <a class="btn btn-primary" id="btnCallSupportRider" href="#" style="background:var(--rust);margin-top:0;">📞 Call GoFair Support</a>
+        <p class="sub" style="margin:10px 0 6px;">Or describe the issue — this goes straight to an admin:</p>
+        <div class="field-stack" style="margin-bottom:8px;">
+          <div class="field"><input type="text" id="riderReportInput" placeholder="What's happening?"></div>
+        </div>
+        <button class="btn btn-outline" id="btnSubmitRiderReport">Send report</button>
+      </div>
+      <div id="riderChatPanel" class="chat-panel hidden">
+        <div class="chat-quick-replies">
+          <button class="chip-btn" data-msg="Where are you now?">Where are you?</button>
+          <button class="chip-btn" data-msg="Is the pickup location correct?">Confirm location</button>
+          <button class="chip-btn" data-msg="I'm running a few minutes late.">Running late</button>
+        </div>
+        <div class="chat-messages" id="riderChatMessages"></div>
+        <div class="chat-input-row">
+          <input type="text" id="riderChatInput" placeholder="Type a message…">
+          <button class="btn btn-primary" id="riderChatSend" style="margin-top:0;flex:none;padding:9px 14px;">Send</button>
+        </div>
+      </div>
+      <div class="trip-steps" id="tripStatusText"><b>Driver is on the way</b> to your pickup point.</div>
+      <p class="sub" style="margin-top:14px;">Paying cash? The trip finishes automatically once your driver marks it complete. Or pay by card now instead:</p>
+      <button class="btn btn-primary" id="btnPayByCard" style="margin-top:8px;background:var(--asphalt);">Pay by Visa / Mastercard</button>
+      <div id="cardPayWaiting" class="hidden" style="text-align:center;padding:10px 0 2px;">
+        <div class="pulse-ring" style="width:34px;height:34px;border-color:var(--teal);margin:0 auto 8px;"></div>
+        <p class="sub" style="margin:0;">Confirming your payment…</p>
+      </div>
+      <button class="btn btn-danger" id="btnCancelTrip" style="margin-top:10px;">Cancel trip</button>
+    </div>
+
+    <div id="stepDone" class="hidden">
+      <h2>Trip complete</h2>
+      <p class="sub">You paid the agreed fare — no surge, no surprises.</p>
+      <div class="fare-shown" id="doneFareShown" style="text-align:left;margin:10px 0 4px;"></div>
+      <div id="ratingWidget">
+        <p class="sub" style="margin-bottom:6px;">Rate your driver</p>
+        <div class="star-row" id="starRow">
+          <span class="star" data-star="1">★</span><span class="star" data-star="2">★</span><span class="star" data-star="3">★</span><span class="star" data-star="4">★</span><span class="star" data-star="5">★</span>
+        </div>
+      </div>
+      <button class="btn btn-primary" id="btnNewTrip" style="margin-top:16px;">Request another ride</button>
+    </div>
+  </div>
+
+  <!-- ============ DRIVER SHEET ============ -->
+  <div class="sheet hidden" id="driverSheet">
+    <div class="sheet-handle"></div>
+
+    <!-- Auth gate: register or log in -->
+    <div id="driverAuth">
+      <div class="tabs">
+        <button id="tabRegister" class="active">Register</button>
+        <button id="tabLogin">Log in</button>
+      </div>
+
+      <div id="driverRegisterForm">
+        <h2>Become a driver</h2>
+        <p class="sub">Your account is reviewed before you can see or bid on ride requests.</p>
+        <div class="field-stack" style="margin-bottom:10px;">
+          <div class="field"><input id="regFullName" placeholder="Full name"></div>
+          <div class="field"><input id="regPhone" placeholder="Phone number" type="tel"></div>
+          <div class="field"><input id="regPassword" placeholder="Choose a password" type="password"></div>
+        </div>
+
+        <p class="sub" style="margin-bottom:6px;">What do you drive?</p>
+        <div class="doctype-row">
+          <label class="doctype-box checked"><input type="radio" name="regVehicleType" value="motorcycle" checked> 🏍 Motorcycle</label>
+          <label class="doctype-box"><input type="radio" name="regVehicleType" value="car"> 🚗 Car</label>
+        </div>
+
+        <p class="sub" style="margin-bottom:6px;">Which ID are you using?</p>
+        <div class="doctype-row">
+          <label class="doctype-box checked"><input type="radio" name="docType" value="national_id" checked> National ID</label>
+          <label class="doctype-box"><input type="radio" name="docType" value="driving_license"> Driving Permit / Licence</label>
+        </div>
+
+        <div class="field-stack" style="margin-bottom:10px;">
+          <div class="field"><input id="regDocNumber" placeholder="ID number"></div>
+          <div class="field"><input id="regVehiclePlate" placeholder="Vehicle plate number"></div>
+          <div class="field"><input id="regVehicleModel" placeholder="Vehicle model (optional)"></div>
+          <div class="field"><input id="regVehicleColor" placeholder="Vehicle color"></div>
+        </div>
+        <p class="sub" style="margin-bottom:6px;">Upload clear photos — these are checked before approval.</p>
+        <div class="upload-row">
+          <label class="upload-box" id="docUploadLabel">National ID photo<input type="file" accept="image/*" id="fileDocPhoto"></label>
+          <label class="upload-box">Selfie<input type="file" accept="image/*" capture="user" id="fileSelfie"></label>
+        </div>
+        <button class="btn btn-primary" id="btnSubmitRegistration">Submit application</button>
+      </div>
+
+      <div id="driverLoginForm" class="hidden">
+        <h2>Log in</h2>
+        <p class="sub">Already applied? Sign in to check your status or start driving.</p>
+        <div class="field-stack" style="margin-bottom:14px;">
+          <div class="field"><input id="loginPhone" placeholder="Phone number" type="tel"></div>
+          <div class="field"><input id="loginPassword" placeholder="Password" type="password"></div>
+        </div>
+        <button class="btn btn-primary" id="btnDriverLogin">Log in</button>
+      </div>
+    </div>
+
+    <!-- Pending review -->
+    <div id="driverPending" class="hidden">
+      <div class="searching">
+        <div class="pulse-ring" style="border-color:var(--teal);"></div>
+        <h2>Application under review</h2>
+        <p class="sub">We're checking your documents. This usually takes a short while.</p>
+      </div>
+      <button class="btn btn-outline" id="btnCheckStatus">Check status</button>
+      <button class="btn btn-danger" id="btnDriverLogout" style="margin-top:8px;">Log out</button>
+    </div>
+
+    <!-- Rejected -->
+    <div id="driverRejected" class="hidden">
+      <h2>Application not approved</h2>
+      <p class="sub" id="rejectReasonText">—</p>
+      <button class="btn btn-primary" id="btnResubmit">Edit and resubmit</button>
+      <button class="btn btn-danger" id="btnDriverLogoutRejected" style="margin-top:8px;">Log out</button>
+    </div>
+
+    <!-- Approved dashboard -->
+    <div id="driverDashboard" class="hidden">
+      <div class="wallet-card">
+        <div>
+          <div class="wallet-label">Wallet balance</div>
+          <div class="wallet-amount" id="walletAmount">UGX 0</div>
+        </div>
+        <button class="btn" id="btnOpenTopup" style="margin-top:0;width:auto;padding:9px 16px;background:var(--amber);color:var(--asphalt);">Top up</button>
+      </div>
+      <div class="wallet-banner hidden" id="walletLowBanner">Top up your wallet to start receiving ride requests — a minimum balance of <span id="walletMinAmount">UGX 5,000</span> is required.</div>
+
+      <div class="topup-form hidden" id="topupForm">
+        <p class="sub" style="margin-bottom:6px;">Enter an amount, then send the prompt to your phone.</p>
+        <div class="field-stack" style="margin-bottom:10px;">
+          <div class="field"><input id="topupAmount" type="number" inputmode="numeric" placeholder="Amount (UGX)"></div>
+        </div>
+        <div class="provider-row">
+          <button class="btn btn-primary" id="btnTopupMomo" style="margin-top:0;">Pay with MTN MoMo</button>
+          <button class="btn btn-primary" id="btnTopupAirtel" style="margin-top:0;background:var(--rust);">Pay with Airtel Money</button>
+        </div>
+        <div class="provider-row">
+          <button class="btn btn-primary" id="btnTopupCard" style="margin-top:0;background:var(--asphalt);">Pay with Visa / Mastercard</button>
+        </div>
+
+        <div id="topupWaiting" class="hidden">
+          <div class="searching" style="padding:14px 0 4px;">
+            <div class="pulse-ring" style="width:38px;height:38px;border-color:var(--teal);"></div>
+            <p class="sub" style="margin:0;">Check your phone and approve the payment prompt…</p>
+          </div>
+        </div>
+
+        <button class="btn btn-outline" id="btnShowManualTopup" style="font-size:12px;padding:8px;">Or submit a manual mobile money reference instead</button>
+        <div class="manual-topup hidden" id="manualTopupForm">
+          <div class="send-to-box" id="sendToBox">
+            <p class="sub" style="margin:0 0 4px;">Send your top-up to:</p>
+            <div id="sendToNumbers">Loading…</div>
+          </div>
+          <p class="sub" style="margin:10px 0 6px;">Then enter the reference from that transaction below — an admin checks it before crediting your wallet.</p>
+          <div class="field-stack" style="margin-bottom:10px;">
+            <div class="field"><input id="topupRef" placeholder="Mobile money transaction reference"></div>
+          </div>
+          <button class="btn btn-outline" id="btnSubmitTopup">Submit for review</button>
+        </div>
+      </div>
+
+      <div id="activeTripCard" class="hidden"></div>
+
+      <h2 style="margin-top:18px;">Ride requests nearby</h2>
+      <p class="sub">Riders' proposed fares appear here live.</p>
+      <div id="driverReqList"></div>
+      <div class="empty-note" id="driverEmpty">No requests right now — new offers appear here the moment a rider posts one, from any device.</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  .tabs{display:flex;gap:8px;margin-bottom:16px;}
+  .tabs button{border:1px solid var(--line);background:#fff;padding:8px 16px;border-radius:999px;font-size:13px;font-weight:600;color:var(--ink-soft);cursor:pointer;font-family:inherit;}
+  .tabs button.active{background:var(--asphalt);color:var(--paper);border-color:var(--asphalt);}
+  .upload-row{display:flex;gap:8px;margin-bottom:14px;}
+  .doctype-row{display:flex;gap:8px;margin-bottom:10px;}
+  .doctype-box{flex:1;border:1.5px solid var(--line);border-radius:10px;padding:10px 8px;text-align:center;font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;}
+  .doctype-box:has(input:checked), .doctype-box.checked{border-color:var(--asphalt);color:var(--ink);background:var(--paper-dim);}
+  .doctype-box input{margin:0;}
+  .wallet-card{display:flex;align-items:center;justify-content:space-between;background:var(--asphalt);color:var(--paper);border-radius:14px;padding:16px;margin-bottom:12px;}
+  .wallet-label{font-size:11.5px;color:rgba(247,244,238,0.7);font-weight:600;}
+  .wallet-amount{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px;}
+  .wallet-banner{background:#FCE8C7;color:#8A5A0D;font-size:12.5px;font-weight:600;padding:10px 12px;border-radius:10px;margin-bottom:12px;line-height:1.5;}
+  .topup-form{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+  .provider-row{display:flex;gap:8px;margin-bottom:12px;}
+  .provider-row .btn{flex:1;font-size:12.5px;padding:11px 6px;}
+  .manual-topup{border-top:1px solid var(--line);margin-top:12px;padding-top:4px;}
+  .send-to-box{background:var(--paper-dim);border-radius:10px;padding:10px 12px;margin-top:10px;}
+  .send-to-box .num-row{display:flex;justify-content:space-between;align-items:center;font-size:14px;font-weight:700;padding:3px 0;}
+  .send-to-box .num-row span:last-child{font-variant-numeric:tabular-nums;}
+  .active-trip-card{background:#F1FAF6;border:1.5px solid var(--teal);border-radius:12px;padding:14px;margin-bottom:14px;}
+  .active-trip-card .title{font-weight:800;font-size:14px;color:var(--teal);margin-bottom:4px;}
+  .active-trip-card .sub2{font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;}
+  .star-row{display:flex;gap:6px;font-size:32px;line-height:1;}
+  .star{color:#D9D5C9;cursor:pointer;transition:color .1s ease;}
+  .star.filled{color:var(--amber);}
+  .upload-box{flex:1;border:1.5px dashed var(--line);border-radius:10px;padding:12px 6px;text-align:center;font-size:11px;color:var(--ink-soft);cursor:pointer;position:relative;font-weight:600;}
+  .upload-box.filled{border-color:var(--teal);color:var(--teal);background:#F1FAF6;}
+  .upload-box input{position:absolute;inset:0;opacity:0;cursor:pointer;}
+</style>
+<script>
+/* ============================================================
+   GoFair — live rider/driver negotiation frontend.
+   Talks to the Node/Socket.io backend in server.js (same origin).
+   Map layer: OpenStreetMap tiles + Leaflet (free, no API key).
+   ============================================================ */
+
+const DEFAULT_CENTER = [0.3476, 32.5825]; // Kampala, Uganda
+let map, pickupMarker, dropMarker, driverMarker, routeLine;
+let pickup = null, drop = null;
+let currentFare = null, myRequestId = null, myThreads = {}; // rider's view of open threads by id
+let matchedInfo = null;
+let role = 'rider';
+let myName = localStorage.getItem('gofair_name') || '';
+if (!myName) {
+  myName = prompt("Your name for this demo (shown to the other side):", "Guest" + Math.floor(Math.random()*900+100)) || "Guest";
+  localStorage.setItem('gofair_name', myName);
+}
+let myPhone = localStorage.getItem('gofair_rider_phone') || '';
+if (!myPhone) {
+  myPhone = prompt("Your phone number (used to keep your ride history fair — no verification needed):", "") || ('guest' + Math.floor(Math.random()*90000+10000));
+  localStorage.setItem('gofair_rider_phone', myPhone);
+}
+let driverToken = localStorage.getItem('gofair_driver_token') || '';
+let myCountry = 'UG';
+let currentCurrency = 'UGX';
+
+const socket = io();
+const connState = document.getElementById('connState');
+socket.on('connect', ()=>{ connState.textContent='live'; connState.className='conn-state live'; identify(); });
+socket.on('disconnect', ()=>{ connState.textContent='reconnecting…'; connState.className='conn-state down'; });
+function identify(){ socket.emit('identify', { role, name: myName, token: role==='driver' ? driverToken : undefined, phone: role==='rider' ? myPhone : undefined, country: myCountry }); }
+
+// GPS-based country detection: silently falls back to Uganda if location
+// is denied, unavailable, or the detected country isn't launched yet —
+// never blocks the app from working.
+let countryConfigCache = null;
+async function getCountryConfig(){
+  if (countryConfigCache) return countryConfigCache;
+  try{ countryConfigCache = await (await fetch('/api/config/countries')).json(); }
+  catch(e){ countryConfigCache = { allCountries: [] }; }
+  return countryConfigCache;
+}
+
+// Reverse-geocodes a coordinate to a country, and reports whether it's an
+// active (launched) country in our system. Shared by both the initial
+// device-location guess and the pickup-point-based detection.
+async function resolveCountryForCoords(lat, lng){
+  try{
+    const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=3`, { headers:{'Accept-Language':'en'} });
+    const geoData = await geoRes.json();
+    const detected = (geoData.address?.country_code || '').toUpperCase();
+    if (!detected) return null;
+    const cfg = await getCountryConfig();
+    return cfg.allCountries.find(c=>c.code===detected) || null;
+  }catch(e){ return null; }
+}
+
+function applyCountry(match){
+  if (!match || match.code === myCountry) return;
+  myCountry = match.code;
+  currentCurrency = match.currency;
+  document.querySelectorAll('.cur').forEach(el=>el.textContent = currentCurrency);
+  identify(); // re-sync the server session — matching, fare rates, and driver rooms all key off this
+}
+
+// Used only once, on first load, before the rider has chosen a pickup
+// point — a reasonable starting guess for map center and currency. The
+// moment a real pickup point is set (see setPickup), THAT takes over as
+// the source of truth instead, since a rider can be arranging a trip for
+// somewhere they aren't physically standing.
+async function detectCountryFromGPS(){
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(async (pos)=>{
+    const match = await resolveCountryForCoords(pos.coords.latitude, pos.coords.longitude);
+    if (!match) return; // unrecognized location — stay on default
+    if (!match.active){
+      toast(`GoFair isn't available in ${match.name} yet — showing Uganda for now`);
+      return;
+    }
+    if (match.mapCenter && typeof map !== 'undefined' && map) map.setView(match.mapCenter, 13);
+    applyCountry(match);
+    recalcFare();
+  }, ()=>{ /* permission denied or unavailable — silent fallback */ }, { timeout: 8000, maximumAge: 600000 });
+}
+
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('show'), 2400);
+}
+function fmtUGX(n){ return Number(n).toLocaleString('en-UG'); }
+function initials(name){ return name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(); }
+
+function haversineKm(a, b){
+  const R = 6371;
+  const dLat = (b[0]-a[0]) * Math.PI/180, dLon = (b[1]-a[1]) * Math.PI/180;
+  const lat1 = a[0]*Math.PI/180, lat2 = b[0]*Math.PI/180;
+  const x = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+}
+function suggestFare(km, vehicleType){
+  const rates = { motorcycle: { base: 1000, perKm: 700 }, car: { base: 2000, perKm: 1300 } };
+  const r = rates[vehicleType] || rates.car;
+  return Math.round((r.base + r.perKm*km)/500)*500;
+}
+
+/* ---------------- Map ---------------- */
+function initMap(){
+  map = L.map('map', {zoomControl:false}).setView(DEFAULT_CENTER, 14);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OpenStreetMap contributors' }).addTo(map);
+  map.on('click', (e)=>{
+    if (role !== 'rider') return;
+    if (!pickup) setPickup([e.latlng.lat, e.latlng.lng], "Dropped pin");
+    else if (!drop) setDrop([e.latlng.lat, e.latlng.lng], "Dropped pin");
+    else { clearTripUI(false); setPickup([e.latlng.lat, e.latlng.lng], "Dropped pin"); }
+  });
+}
+function pinIcon(cls, label){ return L.divIcon({className:'', html:`<div class="pin-label ${cls}">${label}</div>`, iconAnchor:[20,10]}); }
+async function setPickup(latlng, name){
+  pickup={latlng,name}; if(pickupMarker) map.removeLayer(pickupMarker); pickupMarker=L.marker(latlng,{icon:pinIcon('pickup','Pickup')}).addTo(map); document.getElementById('pickupInput').value=name; map.panTo(latlng); recalcFare();
+
+  // The pickup point — not the rider's own device location — is what
+  // should decide currency/rates/matching: someone in Malawi can still be
+  // requesting a ride for someone standing in Zambia.
+  const match = await resolveCountryForCoords(latlng[0], latlng[1]);
+  if (!match) return; // unrecognized location — keep whatever country was already active
+  if (!match.active){
+    toast(`GoFair isn't available for pickups in ${match.name} yet`);
+    return;
+  }
+  if (match.code !== myCountry){
+    applyCountry(match);
+    recalcFare(); // refresh the suggested fare/currency now that the country changed
+  }
+}
+function setDrop(latlng, name){ drop={latlng,name}; if(dropMarker) map.removeLayer(dropMarker); dropMarker=L.marker(latlng,{icon:pinIcon('drop','Drop-off')}).addTo(map); document.getElementById('dropInput').value=name; if(pickup&&drop) map.fitBounds(L.latLngBounds([pickup.latlng,drop.latlng]),{padding:[70,70]}); recalcFare(); }
+let selectedVehicleType = 'motorcycle';
+function recalcFare(){
+  const note=document.getElementById('suggestedFareNote'), btn=document.getElementById('btnRequest');
+  if (pickup && drop){
+    const km = haversineKm(pickup.latlng, drop.latlng);
+    btn.disabled = false;
+    note.textContent = `${km.toFixed(1)} km trip · checking a fair starting price…`;
+    socket.emit('fare:suggest', { vehicleType: selectedVehicleType, km }, (res)=>{
+      if (!res || res.error){
+        // server unreachable — fall back to the plain formula so the app still works
+        const s = suggestFare(km, selectedVehicleType);
+        note.textContent = `${km.toFixed(1)} km trip · typical fare ~${currentCurrency} ${fmtUGX(s)}`;
+        if (!document.getElementById('fareInput').value) document.getElementById('fareInput').value = s;
+        return;
+      }
+      let noteText = `${km.toFixed(1)} km trip · typical fare ~${currentCurrency} ${fmtUGX(res.suggestedFare)}`;
+      if (res.demandMultiplier > 1) noteText += ' · busy right now';
+      if (res.timeMultiplier > 1) noteText += ' · peak hours';
+      if (res.penaltyApplied) noteText += ' · includes a small adjustment from your last cancelled trip';
+      note.textContent = noteText;
+      if (!document.getElementById('fareInput').value) document.getElementById('fareInput').value = res.suggestedFare;
+    });
+  } else { note.textContent = "Set both points to see a suggested fare."; btn.disabled = true; }
+}
+
+/* ---------------- Geocoding (Nominatim, free) ---------------- */
+let geoTimer;
+function wireSearch(inputId, listId, onPick){
+  const input=document.getElementById(inputId), list=document.getElementById(listId);
+  input.addEventListener('input', ()=>{
+    clearTimeout(geoTimer);
+    const q=input.value.trim();
+    if (q.length<3){ list.classList.add('hidden'); return; }
+    geoTimer=setTimeout(async ()=>{
+      try{
+        const res=await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(q)}`,{headers:{'Accept-Language':'en'}});
+        const data=await res.json();
+        if(!data.length){ list.classList.add('hidden'); return; }
+        list.innerHTML='';
+        data.forEach(d=>{
+          const row=document.createElement('div');
+          row.textContent=d.display_name;
+          row.onclick=()=>{ onPick([parseFloat(d.lat),parseFloat(d.lon)], d.display_name.split(',').slice(0,2).join(',')); list.classList.add('hidden'); };
+          list.appendChild(row);
+        });
+        list.classList.remove('hidden');
+      }catch(e){ list.classList.add('hidden'); }
+    }, 450);
+  });
+  input.addEventListener('blur', ()=> setTimeout(()=>list.classList.add('hidden'), 200));
+}
+
+/* ---------------- Rider flow ---------------- */
+function showStep(id){ ['stepPlan','stepSearching','stepBids','stepTrip','stepDone'].forEach(s=>document.getElementById(s).classList.toggle('hidden', s!==id)); }
+
+function clearTripUI(resetMap=true){
+  showStep('stepPlan');
+  document.getElementById('fareInput').value=''; document.getElementById('pickupInput').value=''; document.getElementById('dropInput').value='';
+  myRequestId=null; myThreads={};
+  if (resetMap){ pickup=null; drop=null; if(pickupMarker){map.removeLayer(pickupMarker);pickupMarker=null;} if(dropMarker){map.removeLayer(dropMarker);dropMarker=null;} }
+  if (driverMarker){ map.removeLayer(driverMarker); driverMarker=null; }
+  if (routeLine){ map.removeLayer(routeLine); routeLine=null; }
+  recalcFare();
+}
+
+document.querySelectorAll('.vtype-btn').forEach(btn=>{
+  btn.onclick = ()=>{
+    document.querySelectorAll('.vtype-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedVehicleType = btn.dataset.type;
+    document.getElementById('fareInput').value = ''; // let a new suggestion fill in for the new vehicle type
+    recalcFare();
+  };
+});
+
+document.getElementById('btnRequest').onclick = ()=>{
+  currentFare = parseInt(document.getElementById('fareInput').value, 10);
+  if (!currentFare || currentFare<=0){ toast('Enter a fare amount'); return; }
+  const km = haversineKm(pickup.latlng, drop.latlng);
+  document.getElementById('searchPickupName').textContent = pickup.name;
+  document.getElementById('searchFareShown').textContent = `${currentCurrency} ${fmtUGX(currentFare)}`;
+  showStep('stepSearching');
+  socket.emit('ride:create', {
+    pickup: pickup.latlng, drop: drop.latlng, pickupName: pickup.name, dropName: drop.name,
+    proposedFare: currentFare, vehicleType: selectedVehicleType, km
+  }, (res)=>{
+    if (res && res.requestId) myRequestId = res.requestId;
+  });
+};
+
+document.getElementById('btnCancelSearch').onclick = ()=>{ if(myRequestId) socket.emit('ride:cancel',{requestId:myRequestId}); clearTripUI(); toast('Request cancelled'); };
+document.getElementById('btnCancelBids').onclick = ()=>{ if(myRequestId) socket.emit('ride:cancel',{requestId:myRequestId}); clearTripUI(); toast('Request cancelled'); };
+
+socket.on('thread:new', (thread)=>{
+  myThreads[thread.id] = thread;
+  renderThreads();
+  showStep('stepBids');
+  toast(`${thread.driverName} responded`);
+});
+socket.on('thread:update', (thread)=>{
+  myThreads[thread.id] = thread;
+  renderThreads();
+  toast(`${thread.driverName} sent a new offer`);
+});
+socket.on('thread:closed', ({threadId})=>{
+  delete myThreads[threadId];
+  renderThreads();
+});
+
+function renderThreads(){
+  const wrap = document.getElementById('threadsList');
+  wrap.innerHTML = '';
+  const open = Object.values(myThreads).filter(t=>t.status==='open');
+  if (!open.length){
+    wrap.innerHTML = '<div class="empty-note">No offers yet — open GoFair in another browser/device and switch to Driver mode to try the other side.</div>';
+    return;
+  }
+  open.forEach(t=>{
+    const last = t.offers[t.offers.length-1];
+    const div = document.createElement('div');
+    div.className = 'thread-card';
+    const vehicleLine = [t.vehicleColor, t.vehicleModel].filter(Boolean).join(' ') + (t.vehiclePlate ? ` · ${t.vehiclePlate}` : '');
+    div.innerHTML = `
+      <div class="thread-top">
+        <div class="avatar">${initials(t.driverName)}</div>
+        <div class="thread-name">${t.driverName}${vehicleLine.trim() !== '·' && vehicleLine.trim() ? `<div class="vehicle-line">${vehicleLine}</div>` : ''}</div>
+        <div class="thread-status">${last.by==='driver' ? 'their move' : 'waiting on them'}</div>
+      </div>
+      <div class="offer-trail">${t.offers.map(o=>`<span class="offer-chip ${o.by==='rider'?'mine':''}">${o.by==='rider'?'You':'Them'}: ${currentCurrency} ${fmtUGX(o.price)}</span>`).join('')}</div>
+      <div class="thread-actions">
+        <button class="btn btn-primary btnAccept">Accept ${currentCurrency} ${fmtUGX(last.price)}</button>
+        <button class="btn btn-outline btnCounter">Counter</button>
+        <button class="btn btn-danger btnDecline">Decline</button>
+      </div>
+      <div class="counter-row hidden"><input type="number" placeholder="Your counter (UGX)"><button class="btn btn-primary" style="margin-top:0;flex:none;padding:9px 14px;">Send</button></div>
+    `;
+    div.querySelector('.btnAccept').onclick = ()=> socket.emit('thread:accept', {threadId:t.id});
+    div.querySelector('.btnDecline').onclick = ()=> socket.emit('thread:decline', {threadId:t.id, by:'rider'});
+    div.querySelector('.btnCounter').onclick = ()=> div.querySelector('.counter-row').classList.remove('hidden');
+    div.querySelector('.counter-row button').onclick = ()=>{
+      const v = parseInt(div.querySelector('.counter-row input').value, 10);
+      if (!v){ toast('Enter an amount'); return; }
+      socket.emit('thread:offer', {threadId:t.id, price:v, by:'rider'});
+    };
+    wrap.appendChild(div);
+  });
+}
+
+socket.on('ride:matched', (info)=>{
+  matchedInfo = info;
+  if (info.role === 'rider'){
+    document.getElementById('tripAvatar').textContent = initials(info.counterpartName);
+    document.getElementById('tripDriverName').textContent = info.counterpartName;
+    const vehicleBits = [info.vehicleColor, info.vehicleModel].filter(Boolean).join(' ');
+    document.getElementById('tripCarInfo').innerHTML = `${vehicleBits ? vehicleBits + ' · ' : ''}${info.vehiclePlate ? `<b>${info.vehiclePlate}</b> · ` : ''}Fare agreed at ${currentCurrency} ${fmtUGX(info.price)}`;
+    document.getElementById('tripStatusText').innerHTML = `<b>Driver is on the way</b> to your pickup point.`;
+    document.getElementById('btnCallDriver').href = info.counterpartPhone ? `tel:${info.counterpartPhone}` : '#';
+    document.getElementById('riderChatMessages').innerHTML = '';
+    document.getElementById('riderChatPanel').classList.add('hidden');
+    showStep('stepTrip');
+    spawnDriverOnMap();
+    toast(`Matched at ${currentCurrency} ${fmtUGX(info.price)}`);
+  } else {
+    toast(`Ride confirmed with ${info.counterpartName} at ${currentCurrency} ${fmtUGX(info.price)}`);
+    renderActiveTrip(info);
+    renderDriverRequests();
+  }
+});
+let currentDriverTrip = null;
+function renderActiveTrip(info){
+  currentDriverTrip = info;
+  const card = document.getElementById('activeTripCard');
+  card.className = 'active-trip-card';
+  card.innerHTML = `
+    <div class="title">Trip in progress</div>
+    <div class="sub2">${info.counterpartName} · agreed fare ${currentCurrency} ${fmtUGX(info.price)}</div>
+    <div class="contact-row">
+      <a class="btn btn-outline contact-btn" href="${info.counterpartPhone ? 'tel:'+info.counterpartPhone : '#'}">📞 Call rider</a>
+      <button class="btn btn-outline contact-btn" id="btnMessageRider">💬 Message</button>
+      <button class="btn btn-outline contact-btn" id="btnSafetyDriver" style="border-color:var(--rust);color:var(--rust);">🆘 Safety</button>
+    </div>
+    <div id="driverSafetyPanel" class="chat-panel hidden">
+      <a class="btn btn-primary" id="btnCallSupportDriver" href="#" style="background:var(--rust);margin-top:0;">📞 Call GoFair Support</a>
+      <p class="sub" style="margin:10px 0 6px;">Or describe the issue — this goes straight to an admin:</p>
+      <div class="field-stack" style="margin-bottom:8px;">
+        <div class="field"><input type="text" id="driverReportInput" placeholder="What's happening?"></div>
+      </div>
+      <button class="btn btn-outline" id="btnSubmitDriverReport">Send report</button>
+    </div>
+    <div id="driverChatPanel" class="chat-panel hidden">
+      <div class="chat-quick-replies">
+        <button class="chip-btn" data-msg="I'm on my way.">On my way</button>
+        <button class="chip-btn" data-msg="I've arrived at the pickup point.">I've arrived</button>
+        <button class="chip-btn" data-msg="Can you confirm your exact location?">Confirm location</button>
+      </div>
+      <div class="chat-messages" id="driverChatMessages"></div>
+      <div class="chat-input-row">
+        <input type="text" id="driverChatInput" placeholder="Type a message…">
+        <button class="btn btn-primary" id="driverChatSend" style="margin-top:0;flex:none;padding:9px 14px;">Send</button>
+      </div>
+    </div>
+    <button class="btn btn-outline" style="margin-top:10px;" id="btnMarkArrived">Mark arrived at pickup</button>
+    <button class="btn btn-primary" style="margin-top:8px;" id="btnMarkTripComplete" disabled>Mark trip complete</button>
+  `;
+  card.querySelector('#btnMarkArrived').onclick = (e)=>{
+    socket.emit('trip:arrived', { threadId: info.threadId });
+    e.target.disabled = true; e.target.textContent = 'Arrived ✓';
+    card.querySelector('#btnMarkTripComplete').disabled = false;
+  };
+  card.querySelector('#btnMarkTripComplete').onclick = ()=> socket.emit('trip:complete', { threadId: info.threadId });
+  card.querySelector('#btnMessageRider').onclick = ()=> document.getElementById('driverChatPanel').classList.toggle('hidden');
+  card.querySelector('#btnSafetyDriver').onclick = async ()=>{
+    const panel = document.getElementById('driverSafetyPanel');
+    panel.classList.toggle('hidden');
+    const cfg = await loadSupportConfig();
+    document.getElementById('btnCallSupportDriver').href = cfg.phone ? `tel:${cfg.phone}` : '#';
+  };
+  card.querySelector('#btnSubmitDriverReport').onclick = async ()=>{
+    const input = document.getElementById('driverReportInput');
+    if (!input.value.trim()){ toast('Describe what\'s happening first'); return; }
+    try{
+      await fetch('/api/support/report', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ reporterRole:'driver', reporterPhone: null, threadId: currentDriverTrip?.threadId, message: input.value.trim() })
+      });
+      toast('Report sent — an admin will follow up');
+      input.value = '';
+      document.getElementById('driverSafetyPanel').classList.add('hidden');
+    }catch(e){ toast('Could not send — try calling support instead'); }
+  };
+  card.querySelectorAll('#driverChatPanel .chip-btn').forEach(chip=>{
+    chip.onclick = ()=> sendDriverChat(chip.dataset.msg);
+  });
+  card.querySelector('#driverChatSend').onclick = ()=>{
+    const input = card.querySelector('#driverChatInput');
+    if (input.value.trim()) sendDriverChat(input.value.trim());
+    input.value = '';
+  };
+  card.querySelector('#driverChatInput').addEventListener('keydown', (e)=>{
+    if (e.key === 'Enter') card.querySelector('#driverChatSend').click();
+  });
+}
+function sendDriverChat(text){
+  if (!currentDriverTrip) return;
+  socket.emit('chat:send', { threadId: currentDriverTrip.threadId, text });
+  appendChatBubble('driverChatMessages', text, true);
+}
+socket.on('trip:cancelledByRider', ({threadId, penalized})=>{
+  currentDriverTrip = null;
+  document.getElementById('activeTripCard').classList.add('hidden');
+  toast(penalized ? 'Rider cancelled after you arrived — noted on their account' : 'Rider cancelled the trip');
+  renderDriverRequests();
+});
+socket.on('ride:closed', ({requestId})=>{
+  // a request this driver had a thread on got matched to someone else
+  toast('That request was matched with another driver');
+  renderDriverRequests();
+});
+
+function spawnDriverOnMap(){
+  if (!pickup || !drop) return;
+  const jitter = 0.01;
+  const start = [pickup.latlng[0]+(Math.random()-0.5)*jitter*2, pickup.latlng[1]+(Math.random()-0.5)*jitter*2];
+  driverMarker = L.marker(start, {icon:pinIcon('driver','Driver')}).addTo(map);
+  routeLine = L.polyline([start, pickup.latlng], {color:'#2F7A5E', weight:3, dashArray:'6,6'}).addTo(map);
+  map.fitBounds(L.latLngBounds([start, pickup.latlng, drop.latlng]), {padding:[70,90]});
+  let steps=0; const totalSteps=18;
+  const t = setInterval(()=>{
+    steps++;
+    const p = steps/totalSteps;
+    driverMarker.setLatLng([start[0]+(pickup.latlng[0]-start[0])*p, start[1]+(pickup.latlng[1]-start[1])*p]);
+    if (steps>=totalSteps){ clearInterval(t); document.getElementById('tripEta').textContent='Arrived'; document.getElementById('tripStatusText').innerHTML = `<b>${matchedInfo.counterpartName} has arrived</b> at the pickup point.`; }
+  }, 700);
+}
+socket.on('trip:driverArrived', ({threadId})=>{
+  if (!matchedInfo || matchedInfo.threadId !== threadId) return;
+  document.getElementById('tripEta').textContent = 'Arrived';
+  document.getElementById('tripStatusText').innerHTML = `<b>${matchedInfo.counterpartName} has arrived</b> at the pickup point.`;
+  toast('Your driver has arrived');
+});
+
+let supportConfig = null;
+async function loadSupportConfig(){
+  if (supportConfig) return supportConfig;
+  try{ supportConfig = await (await fetch('/api/config/support')).json(); }catch(e){ supportConfig = {}; }
+  return supportConfig;
+}
+
+document.getElementById('btnSafetyRider').onclick = async ()=>{
+  const panel = document.getElementById('riderSafetyPanel');
+  panel.classList.toggle('hidden');
+  const cfg = await loadSupportConfig();
+  document.getElementById('btnCallSupportRider').href = cfg.phone ? `tel:${cfg.phone}` : '#';
+};
+document.getElementById('btnSubmitRiderReport').onclick = async ()=>{
+  const input = document.getElementById('riderReportInput');
+  if (!input.value.trim()){ toast('Describe what\'s happening first'); return; }
+  try{
+    await fetch('/api/support/report', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ reporterRole:'rider', reporterPhone: myPhone, threadId: matchedInfo?.threadId, message: input.value.trim() })
+    });
+    toast('Report sent — an admin will follow up');
+    input.value = '';
+    document.getElementById('riderSafetyPanel').classList.add('hidden');
+  }catch(e){ toast('Could not send — try calling support instead'); }
+};
+
+document.getElementById('btnShareTripRider').onclick = async ()=>{
+  if (!matchedInfo) return;
+  const link = `${window.location.origin}/track.html?trip=${matchedInfo.threadId}`;
+  const text = `I'm on a GoFair trip with ${matchedInfo.counterpartName}${matchedInfo.vehiclePlate ? ' ('+matchedInfo.vehiclePlate+')' : ''}. Track it here: ${link}`;
+  if (navigator.share){
+    try{ await navigator.share({ title: 'My GoFair trip', text, url: link }); return; }catch(e){ /* user cancelled or unsupported — fall through to copy */ }
+  }
+  try{ await navigator.clipboard.writeText(text); toast('Trip link copied — paste it to share'); }
+  catch(e){ prompt('Copy this link to share your trip:', text); }
+};
+
+document.getElementById('btnMessageDriver').onclick = ()=>{
+  document.getElementById('riderChatPanel').classList.toggle('hidden');
+};
+document.querySelectorAll('#riderChatPanel .chip-btn').forEach(chip=>{
+  chip.onclick = ()=> sendRiderChat(chip.dataset.msg);
+});
+document.getElementById('riderChatSend').onclick = ()=>{
+  const input = document.getElementById('riderChatInput');
+  if (input.value.trim()) sendRiderChat(input.value.trim());
+  input.value = '';
+};
+document.getElementById('riderChatInput').addEventListener('keydown', (e)=>{
+  if (e.key === 'Enter') document.getElementById('riderChatSend').click();
+});
+function sendRiderChat(text){
+  if (!matchedInfo) return;
+  socket.emit('chat:send', { threadId: matchedInfo.threadId, text });
+  appendChatBubble('riderChatMessages', text, true);
+}
+function appendChatBubble(containerId, text, mine){
+  const wrap = document.getElementById(containerId);
+  const div = document.createElement('div');
+  div.className = `chat-bubble ${mine ? 'mine' : 'theirs'}`;
+  div.textContent = text;
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+socket.on('chat:message', (msg)=>{
+  if (role === 'rider' && matchedInfo && msg.threadId === matchedInfo.threadId){
+    appendChatBubble('riderChatMessages', msg.text, false);
+    document.getElementById('riderChatPanel').classList.remove('hidden');
+    toast(`${matchedInfo.counterpartName}: ${msg.text}`);
+  } else if (role === 'driver' && currentDriverTrip && msg.threadId === currentDriverTrip.threadId){
+    appendChatBubble('driverChatMessages', msg.text, false);
+    document.getElementById('driverChatPanel')?.classList.remove('hidden');
+    toast(`${currentDriverTrip.counterpartName}: ${msg.text}`);
+  }
+});
+
+document.getElementById('btnCancelTrip').onclick = ()=>{
+  if (!matchedInfo) return;
+  if (!confirm('Cancel this trip? If your driver has already arrived, a small note is added to your account for next time.')) return;
+  socket.emit('trip:cancel', { threadId: matchedInfo.threadId });
+};
+socket.on('trip:cancelConfirmed', ({penalized})=>{
+  toast(penalized ? 'Trip cancelled — noted since your driver had already arrived' : 'Trip cancelled');
+  matchedInfo = null;
+  clearTripUI();
+});
+
+document.getElementById('btnPayByCard').onclick = async ()=>{
+  if (!matchedInfo) return;
+  document.getElementById('btnPayByCard').disabled = true;
+  document.getElementById('cardPayWaiting').classList.remove('hidden');
+  try{
+    const res = await fetch('/api/rider/fare/pay/initiate', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ threadId: matchedInfo.threadId, riderPhone: myPhone, riderName: myName })
+    });
+    const data = await res.json();
+    if (!res.ok){ toast(data.error || 'Could not start payment'); resetCardPayUI(); return; }
+    if (data.simulated) toast('Simulation mode: no real card processor set up yet — auto-confirming shortly');
+    if (data.checkoutLink) window.open(data.checkoutLink, '_blank'); // real Flutterwave mode: their hosted card page
+    pollCardPayment(data.paymentId);
+  }catch(e){ toast('Something went wrong — try again'); resetCardPayUI(); }
+};
+function resetCardPayUI(){
+  document.getElementById('btnPayByCard').disabled = false;
+  document.getElementById('cardPayWaiting').classList.add('hidden');
+}
+async function pollCardPayment(paymentId){
+  for (let i=0;i<20;i++){
+    await new Promise(r=>setTimeout(r,3000));
+    try{
+      const res = await fetch(`/api/rider/fare/pay/${paymentId}/status`);
+      const data = await res.json();
+      if (data.status === 'completed'){
+        // trip:completed socket event (below) handles moving to the Done screen
+        return;
+      }
+      if (data.status === 'payout_failed'){
+        toast('Your payment went through, but there was an issue paying the driver — support will follow up.');
+        resetCardPayUI();
+        return;
+      }
+    }catch(e){ /* keep polling */ }
+  }
+  toast('Still confirming your payment — check back shortly');
+  resetCardPayUI();
+}
+
+let selectedRatingStars = 0;
+document.querySelectorAll('#starRow .star').forEach(star=>{
+  star.onclick = ()=>{
+    selectedRatingStars = parseInt(star.dataset.star, 10);
+    document.querySelectorAll('#starRow .star').forEach(s=>{
+      s.classList.toggle('filled', parseInt(s.dataset.star,10) <= selectedRatingStars);
+    });
+    if (matchedInfo?.threadId){
+      socket.emit('trip:rate', { threadId: matchedInfo.threadId, stars: selectedRatingStars }, (res)=>{
+        if (res && res.ok) toast('Thanks for rating your driver!');
+      });
+    }
+  };
+});
+
+socket.on('trip:completed', (info)=>{
+  if (info.role === 'rider'){
+    document.getElementById('doneFareShown').textContent = `${info.paidByCard ? 'Paid by card: ' : ''}${currentCurrency} ${fmtUGX(info.price)}${info.paidByCard ? '' : ' paid to ' + info.driverName}`;
+    selectedRatingStars = 0;
+    document.querySelectorAll('#starRow .star').forEach(s=>s.classList.remove('filled'));
+    showStep('stepDone');
+  } else {
+    // driver side
+    currentDriverTrip = null;
+    document.getElementById('activeTripCard').classList.add('hidden');
+    if (info.paidByCard){
+      toast(`Trip complete — paid out to your mobile money, minus ${Math.round(currentCommissionRate*100)}% commission`);
+    } else {
+      toast(`Trip complete — ${currentCurrency} ${fmtUGX(Math.round(info.price*currentCommissionRate))} commission deducted`);
+    }
+    renderDriverRequests();
+  }
+});
+document.getElementById('btnNewTrip').onclick = ()=>{ matchedInfo=null; clearTripUI(); };
+
+/* ---------------- Driver flow ---------------- */
+let driverRequests = {}; // requestId -> request
+let driverThreadByRequest = {}; // requestId -> threadId this driver started
+
+socket.on('ride:list', (list)=>{ driverRequests={}; list.forEach(r=>driverRequests[r.id]=r); renderDriverRequests(); });
+socket.on('ride:available', (r)=>{ if (role==='driver'){ driverRequests[r.id]=r; renderDriverRequests(); } });
+socket.on('ride:removed', ({requestId})=>{ delete driverRequests[requestId]; delete driverThreadByRequest[requestId]; renderDriverRequests(); });
+
+function renderDriverRequests(){
+  const list = document.getElementById('driverReqList');
+  const empty = document.getElementById('driverEmpty');
+  list.innerHTML = '';
+  const open = Object.values(driverRequests);
+  empty.classList.toggle('hidden', open.length>0);
+  open.forEach(r=>{
+    const card = document.createElement('div');
+    card.className = 'req-card';
+    const activeThreadId = driverThreadByRequest[r.id];
+    card.innerHTML = `
+      <div class="req-top">
+        <div class="req-route">${r.pickupName} <span class="to">→ ${r.dropName}</span></div>
+        <div class="req-price">${currentCurrency} ${fmtUGX(r.proposedFare)}</div>
+      </div>
+      <div class="req-dist">${r.km.toFixed(1)} km · ${r.riderName}'s proposed fare</div>
+      <div class="req-actions">
+        <button class="btn btn-primary" id="acc-${r.id}">Accept fare</button>
+        <button class="btn btn-outline" id="cnt-${r.id}">Counter-offer</button>
+      </div>
+      <div class="counter-row hidden" id="cntrow-${r.id}"><input type="number" placeholder="Your price (UGX)"><button class="btn btn-primary" style="margin-top:0;flex:none;padding:9px 14px;">Send</button></div>
+      ${activeThreadId ? '<div class="waiting-note">Waiting for rider to respond…</div>' : ''}
+    `;
+    card.querySelector(`#acc-${r.id}`).onclick = ()=>{
+      socket.emit('thread:start', {requestId:r.id, price:r.proposedFare}, (res)=>{
+        if (res && res.threadId) socket.emit('thread:accept', {threadId:res.threadId});
+      });
+    };
+    card.querySelector(`#cnt-${r.id}`).onclick = ()=> card.querySelector(`#cntrow-${r.id}`).classList.remove('hidden');
+    card.querySelector(`#cntrow-${r.id} button`).onclick = ()=>{
+      const v = parseInt(card.querySelector(`#cntrow-${r.id} input`).value, 10);
+      if (!v){ toast('Enter an amount'); return; }
+      socket.emit('thread:start', {requestId:r.id, price:v}, (res)=>{
+        if (res && res.threadId){ driverThreadByRequest[r.id]=res.threadId; renderDriverRequests(); toast('Counter-offer sent'); }
+      });
+    };
+    list.appendChild(card);
+  });
+}
+
+// A driver's own thread getting a rider counter needs its own listener,
+// since thread:new/update above are wired for the rider side above.
+// We reuse the same events but branch on role.
+socket.on('thread:update', (thread)=>{
+  if (role === 'driver' && thread.driverName === myName){
+    const last = thread.offers[thread.offers.length-1];
+    if (last.by === 'rider'){
+      toast(`Rider countered: ${currentCurrency} ${fmtUGX(last.price)}`);
+      showDriverCounterPrompt(thread);
+    }
+  }
+});
+function showDriverCounterPrompt(thread){
+  const r = driverRequests[thread.requestId];
+  const wrap = document.getElementById('driverReqList');
+  const card = document.createElement('div');
+  card.className = 'req-card';
+  const last = thread.offers[thread.offers.length-1];
+  card.innerHTML = `
+    <div class="req-top"><div class="req-route"><b>Rider countered</b></div><div class="req-price">${currentCurrency} ${fmtUGX(last.price)}</div></div>
+    <div class="req-dist">On thread with ${r ? r.riderName : 'rider'}</div>
+    <div class="req-actions">
+      <button class="btn btn-primary bAcc">Accept</button>
+      <button class="btn btn-outline bCnt">Counter again</button>
+      <button class="btn btn-danger bDec">Decline</button>
+    </div>
+    <div class="counter-row hidden"><input type="number" placeholder="Your price (UGX)"><button class="btn btn-primary" style="margin-top:0;flex:none;padding:9px 14px;">Send</button></div>
+  `;
+  card.querySelector('.bAcc').onclick = ()=> socket.emit('thread:accept', {threadId:thread.id});
+  card.querySelector('.bDec').onclick = ()=>{ socket.emit('thread:decline', {threadId:thread.id, by:'driver'}); card.remove(); };
+  card.querySelector('.bCnt').onclick = ()=> card.querySelector('.counter-row').classList.remove('hidden');
+  card.querySelector('.counter-row button').onclick = ()=>{
+    const v = parseInt(card.querySelector('.counter-row input').value, 10);
+    if (!v){ toast('Enter an amount'); return; }
+    socket.emit('thread:offer', {threadId:thread.id, price:v, by:'driver'});
+    card.remove();
+  };
+  wrap.prepend(card);
+}
+
+/* ---------------- Mode switching ---------------- */
+document.getElementById('btnRiderMode').onclick = ()=>{
+  role='rider'; identify();
+  document.getElementById('btnRiderMode').classList.add('active'); document.getElementById('btnDriverMode').classList.remove('active');
+  document.getElementById('riderSheet').classList.remove('hidden'); document.getElementById('driverSheet').classList.add('hidden');
+};
+document.getElementById('btnDriverMode').onclick = ()=>{
+  role='driver';
+  document.getElementById('btnDriverMode').classList.add('active'); document.getElementById('btnRiderMode').classList.remove('active');
+  document.getElementById('driverSheet').classList.remove('hidden'); document.getElementById('riderSheet').classList.add('hidden');
+  resolveDriverState();
+};
+document.getElementById('locateBtn').onclick = ()=>{
+  if (!navigator.geolocation){ toast('Location not available'); return; }
+  navigator.geolocation.getCurrentPosition(pos=> map.setView([pos.coords.latitude,pos.coords.longitude],15), ()=>toast('Could not get location'));
+};
+
+/* ---------------- Driver auth / verification flow ---------------- */
+function showDriverState(state){
+  ['driverAuth','driverPending','driverRejected','driverDashboard'].forEach(id=>{
+    document.getElementById(id).classList.toggle('hidden', id!==state);
+  });
+}
+
+async function resolveDriverState(){
+  if (!driverToken){ showDriverState('driverAuth'); return; }
+  try{
+    const res = await fetch('/api/driver/me', { headers:{ Authorization:`Bearer ${driverToken}` } });
+    if (!res.ok){ driverLogout(); return; }
+    const data = await res.json();
+    applyDriverStatus(data.driver.status, data.driver.reviewNote);
+  }catch(e){ toast('Could not reach the server'); }
+}
+
+function applyDriverStatus(status, reviewNote){
+  identify(); // registers this socket against the driver record for live status pushes, whatever the status
+  updateDriverUI(status, reviewNote, null);
+}
+
+function updateDriverUI(status, reviewNote, wallet){
+  if (status === 'approved'){
+    showDriverState('driverDashboard');
+    if (wallet) renderWallet(wallet);
+    renderDriverRequests();
+  } else if (status === 'pending'){
+    showDriverState('driverPending');
+  } else if (status === 'rejected'){
+    document.getElementById('rejectReasonText').textContent = reviewNote || 'Your application did not meet requirements.';
+    showDriverState('driverRejected');
+  }
+}
+
+let currentCommissionRate = 0.07;
+function renderWallet(wallet){
+  currentCommissionRate = wallet.commissionRate;
+  document.getElementById('walletAmount').textContent = `${currentCurrency} ${fmtUGX(wallet.walletBalance)}`;
+  const banner = document.getElementById('walletLowBanner');
+  if (wallet.freeTrialMode){
+    banner.innerHTML = `🎉 Free trial period — no minimum wallet balance required right now. A small commission still applies to completed rides.`;
+    banner.classList.remove('hidden');
+    banner.style.background = '#D9EFE3';
+    banner.style.color = 'var(--teal)';
+  } else {
+    banner.innerHTML = `Top up your wallet to start receiving ride requests — a minimum balance of <span id="walletMinAmount">${currentCurrency} ${fmtUGX(wallet.minBalance)}</span> is required.`;
+    banner.style.background = '';
+    banner.style.color = '';
+    banner.classList.toggle('hidden', wallet.walletBalance >= wallet.minBalance);
+  }
+}
+
+socket.on('driver:status', (info)=>{
+  if (role !== 'driver') return;
+  if (info.status === 'unauthenticated'){ driverLogout(); return; }
+  updateDriverUI(info.status, info.reviewNote, info.wallet);
+  if (info.status === 'approved' && lastKnownDriverStatus !== 'approved') toast('Your driver account was approved!');
+  if (info.status === 'rejected') toast('Your application was not approved.');
+  lastKnownDriverStatus = info.status;
+});
+socket.on('wallet:update', (wallet)=>{ renderWallet(wallet); });
+let lastKnownDriverStatus = null;
+
+function driverLogout(){
+  driverToken = '';
+  localStorage.removeItem('gofair_driver_token');
+  showDriverState('driverAuth');
+}
+document.getElementById('btnDriverLogout').onclick = driverLogout;
+document.getElementById('btnDriverLogoutRejected').onclick = driverLogout;
+document.getElementById('btnResubmit').onclick = ()=> showDriverState('driverAuth');
+document.getElementById('btnCheckStatus').onclick = resolveDriverState;
+
+document.getElementById('btnOpenTopup').onclick = ()=>{
+  document.getElementById('topupForm').classList.toggle('hidden');
+};
+let topupNumbersLoaded = false;
+document.getElementById('btnShowManualTopup').onclick = async ()=>{
+  document.getElementById('manualTopupForm').classList.toggle('hidden');
+  if (topupNumbersLoaded) return;
+  try{
+    const res = await fetch('/api/config/topup-numbers');
+    const data = await res.json();
+    const rows = [];
+    if (data.momoNumber) rows.push(`<div class="num-row"><span>MTN MoMo${data.momoName ? ' — '+data.momoName : ''}</span><span>${data.momoNumber}</span></div>`);
+    if (data.airtelNumber) rows.push(`<div class="num-row"><span>Airtel Money${data.airtelName ? ' — '+data.airtelName : ''}</span><span>${data.airtelNumber}</span></div>`);
+    document.getElementById('sendToNumbers').innerHTML = rows.length ? rows.join('') : 'No manual top-up number has been set up yet — ask your admin, or use the automatic MTN MoMo / Airtel Money buttons above instead.';
+    topupNumbersLoaded = true;
+  }catch(e){
+    document.getElementById('sendToNumbers').textContent = 'Could not load — ask your admin for the number.';
+  }
+};
+
+async function startProviderTopup(provider){
+  const amount = parseInt(document.getElementById('topupAmount').value, 10);
+  if (!amount || amount <= 0){ toast('Enter a valid amount'); return; }
+  document.getElementById('topupWaiting').classList.remove('hidden');
+  document.querySelectorAll('.provider-row .btn').forEach(b=>b.disabled = true);
+  try{
+    const res = await fetch('/api/driver/wallet/topup/initiate', {
+      method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${driverToken}`},
+      body: JSON.stringify({ provider, amount })
+    });
+    const data = await res.json();
+    if (!res.ok){ toast(data.error || 'Could not start the payment'); resetTopupUI(); return; }
+    if (data.simulated) toast('Simulation mode: no real credentials set yet — auto-confirming shortly');
+    if (data.checkoutLink) window.open(data.checkoutLink, '_blank'); // real Flutterwave mode: their hosted card page, opened in a new tab
+    pollTopupStatus(data.entryId);
+  }catch(e){ toast('Something went wrong — try again'); resetTopupUI(); }
+}
+document.getElementById('btnTopupMomo').onclick = ()=> startProviderTopup('momo');
+document.getElementById('btnTopupAirtel').onclick = ()=> startProviderTopup('airtel');
+document.getElementById('btnTopupCard').onclick = ()=> startProviderTopup('card');
+
+function resetTopupUI(){
+  document.getElementById('topupWaiting').classList.add('hidden');
+  document.querySelectorAll('.provider-row .btn').forEach(b=>b.disabled = false);
+}
+
+async function pollTopupStatus(entryId){
+  for (let i = 0; i < 20; i++){ // ~60s of polling before giving up
+    await new Promise(r=>setTimeout(r, 3000));
+    try{
+      const res = await fetch(`/api/driver/wallet/topup/${entryId}/status`, { headers:{ Authorization:`Bearer ${driverToken}` } });
+      const data = await res.json();
+      if (data.status === 'confirmed'){
+        toast('Top-up confirmed!');
+        if (data.wallet) renderWallet(data.wallet);
+        document.getElementById('topupForm').classList.add('hidden');
+        document.getElementById('topupAmount').value = '';
+        resetTopupUI();
+        return;
+      }
+      if (data.status === 'rejected'){
+        toast('Payment was not completed — try again');
+        resetTopupUI();
+        return;
+      }
+      // still processing — keep polling
+    }catch(e){ /* transient network error — keep polling */ }
+  }
+  toast('Still waiting on that payment — check your wallet again shortly');
+  resetTopupUI();
+}
+
+document.getElementById('btnSubmitTopup').onclick = async ()=>{
+  const amount = parseInt(document.getElementById('topupAmount').value, 10);
+  const momoRef = document.getElementById('topupRef').value.trim();
+  if (!amount || amount <= 0){ toast('Enter a valid amount'); return; }
+  if (!momoRef){ toast('Enter the mobile money transaction reference'); return; }
+  try{
+    const res = await fetch('/api/driver/wallet/topup-request', {
+      method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${driverToken}`},
+      body: JSON.stringify({ amount, momoRef })
+    });
+    const data = await res.json();
+    if (!res.ok){ toast(data.error || 'Could not submit top-up'); return; }
+    toast('Top-up submitted — pending admin confirmation');
+    document.getElementById('topupForm').classList.add('hidden');
+    document.getElementById('topupAmount').value = '';
+    document.getElementById('topupRef').value = '';
+  }catch(e){ toast('Something went wrong — try again'); }
+};
+
+document.getElementById('tabRegister').onclick = ()=>{
+  document.getElementById('tabRegister').classList.add('active');
+  document.getElementById('tabLogin').classList.remove('active');
+  document.getElementById('driverRegisterForm').classList.remove('hidden');
+  document.getElementById('driverLoginForm').classList.add('hidden');
+};
+document.getElementById('tabLogin').onclick = ()=>{
+  document.getElementById('tabLogin').classList.add('active');
+  document.getElementById('tabRegister').classList.remove('active');
+  document.getElementById('driverLoginForm').classList.remove('hidden');
+  document.getElementById('driverRegisterForm').classList.add('hidden');
+};
+
+function fileToBase64(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+[['fileDocPhoto'],['fileSelfie']].forEach(([id])=>{
+  document.getElementById(id).addEventListener('change', (e)=>{
+    e.target.closest('.upload-box').classList.toggle('filled', !!e.target.files.length);
+  });
+});
+function wireRadioGroup(name, onChange){
+  const radios = document.querySelectorAll(`input[name="${name}"]`);
+  radios.forEach(radio=>{
+    radio.addEventListener('change', ()=>{
+      radios.forEach(r=>r.closest('.doctype-box').classList.remove('checked'));
+      radio.closest('.doctype-box').classList.add('checked');
+      if (onChange) onChange(radio.value);
+    });
+  });
+}
+wireRadioGroup('regVehicleType');
+wireRadioGroup('docType', (value)=>{
+  const label = document.getElementById('docUploadLabel');
+  label.firstChild.textContent = value === 'national_id' ? 'National ID photo' : 'Driving Permit photo';
+});
+
+document.getElementById('btnSubmitRegistration').onclick = async ()=>{
+  const fullName = document.getElementById('regFullName').value.trim();
+  const phone = document.getElementById('regPhone').value.trim();
+  const password = document.getElementById('regPassword').value;
+  const vehicleType = document.querySelector('input[name="regVehicleType"]:checked').value;
+  const documentType = document.querySelector('input[name="docType"]:checked').value;
+  const documentNumber = document.getElementById('regDocNumber').value.trim();
+  const vehiclePlate = document.getElementById('regVehiclePlate').value.trim();
+  const vehicleModel = document.getElementById('regVehicleModel').value.trim();
+  const vehicleColor = document.getElementById('regVehicleColor').value.trim();
+  const docFile = document.getElementById('fileDocPhoto').files[0];
+  const selfieFile = document.getElementById('fileSelfie').files[0];
+
+  if (!fullName || !phone || !password || !documentNumber || !vehiclePlate || !docFile || !selfieFile){
+    toast('Please fill in all required fields and photos'); return;
+  }
+  const btn = document.getElementById('btnSubmitRegistration');
+  btn.disabled = true; btn.textContent = 'Submitting…';
+  try{
+    const documentPhoto = await fileToBase64(docFile);
+    const selfie = await fileToBase64(selfieFile);
+    const res = await fetch('/api/driver/register', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ fullName, phone, password, country: myCountry, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, documentPhoto, selfie })
+    });
+    const data = await res.json();
+    if (!res.ok){ toast(data.error || 'Could not submit application'); return; }
+    driverToken = data.token;
+    localStorage.setItem('gofair_driver_token', driverToken);
+    applyDriverStatus(data.driver.status, data.driver.reviewNote);
+  }catch(e){ toast('Something went wrong — try again'); }
+  finally{ btn.disabled = false; btn.textContent = 'Submit application'; }
+};
+
+document.getElementById('btnDriverLogin').onclick = async ()=>{
+  const phone = document.getElementById('loginPhone').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  if (!phone || !password){ toast('Enter phone and password'); return; }
+  try{
+    const res = await fetch('/api/driver/login', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ phone, password })
+    });
+    const data = await res.json();
+    if (!res.ok){ toast(data.error || 'Login failed'); return; }
+    driverToken = data.token;
+    localStorage.setItem('gofair_driver_token', driverToken);
+    applyDriverStatus(data.driver.status, data.driver.reviewNote);
+  }catch(e){ toast('Something went wrong — try again'); }
+};
+
+/* ---------------- Init ---------------- */
+initMap();
+detectCountryFromGPS();
+wireSearch('pickupInput','suggestPickup', setPickup);
+wireSearch('dropInput','suggestDrop', setDrop);
+recalcFare();
+</script>
+</body>
+</html>
