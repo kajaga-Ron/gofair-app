@@ -43,7 +43,13 @@
   .suggest-list div{padding:10px 14px;font-size:13.5px;cursor:pointer;border-bottom:1px solid var(--line);}
   .suggest-list div:last-child{border-bottom:none;} .suggest-list div:hover{background:var(--paper-dim);}
   .fare-row{display:flex;align-items:center;gap:12px;margin-top:14px;}
-  .vehicle-toggle{display:flex;gap:8px;margin-bottom:12px;}
+  .vehicle-toggle{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;}
+  .category-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px;}
+  .category-card{border:1px solid var(--line);border-radius:14px;padding:20px 10px;text-align:center;cursor:pointer;background:#fff;font-family:inherit;}
+  .category-card:hover{border-color:var(--amber);}
+  .category-card .cat-icon{font-size:28px;display:block;margin-bottom:8px;}
+  .category-card .cat-label{font-weight:700;font-size:13.5px;}
+  .btn-back-cat{background:none;border:none;color:var(--ink-soft);font-size:13px;font-weight:600;padding:0 0 10px;cursor:pointer;font-family:inherit;}
   .vtype-btn{flex:1;border:1.5px solid var(--line);background:#fff;border-radius:12px;padding:10px;font-size:13.5px;font-weight:700;color:var(--ink-soft);cursor:pointer;font-family:inherit;}
   .vtype-btn.active{border-color:var(--asphalt);background:var(--asphalt);color:var(--paper);}
   .fare-input-wrap{flex:1;display:flex;align-items:center;gap:6px;border:1.5px solid var(--asphalt);border-radius:12px;padding:10px 14px;background:#fff;}
@@ -133,26 +139,33 @@
   <div class="sheet" id="riderSheet">
     <div class="sheet-handle"></div>
 
-    <div id="stepPlan">
-      <h2>Where to?</h2>
-      <p class="sub">Tap the map to drop pins, or search below.</p>
-      <div class="vehicle-toggle">
-        <button class="vtype-btn active" data-type="motorcycle">🏍 Motorcycle</button>
-        <button class="vtype-btn" data-type="car">🚗 Car</button>
-      </div>
+    <div id="stepCategoryPicker">
+      <h2>What do you need?</h2>
+      <p class="sub">Choose what you're looking for today.</p>
+      <div class="category-grid" id="categoryGrid"></div>
+    </div>
+
+    <div id="stepPlan" class="hidden">
+      <button class="btn-back-cat" id="btnBackToCategories">← Change what you need</button>
+      <h2 id="stepPlanTitle">Where to?</h2>
+      <p class="sub" id="stepPlanSub">Tap the map to drop pins, or search below.</p>
+      <div class="vehicle-toggle" id="subtypeToggle"></div>
       <div class="field-stack">
         <div class="field">
           <span class="dot pickup"></span>
           <input id="pickupInput" placeholder="Pickup location" autocomplete="off">
           <div class="suggest-list hidden" id="suggestPickup"></div>
         </div>
-        <div class="field">
+        <div class="field" id="dropFieldWrap">
           <span class="dot drop"></span>
           <input id="dropInput" placeholder="Where are you going?" autocomplete="off">
           <div class="suggest-list hidden" id="suggestDrop"></div>
         </div>
       </div>
-      <div class="fare-row">
+      <div id="weightFieldWrap" class="field-stack hidden" style="margin-top:8px;">
+        <div class="field"><input id="weightInput" type="number" inputmode="numeric" placeholder="How many kg of recyclables?" min="0"></div>
+      </div>
+      <div class="fare-row" id="fareRowWrap">
         <div class="fare-input-wrap">
           <span class="cur">UGX</span>
           <input id="fareInput" type="number" inputmode="numeric" placeholder="0" min="0" step="500">
@@ -161,6 +174,7 @@
       <div class="suggested-fare" id="suggestedFareNote">Set both points to see a suggested fare.</div>
       <button class="btn btn-primary" id="btnRequest" disabled>Propose this fare</button>
     </div>
+
 
     <div id="stepSearching" class="hidden">
       <div class="searching">
@@ -552,10 +566,19 @@ function initMap(){
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OpenStreetMap contributors' }).addTo(map);
   map.on('click', (e)=>{
     if (role !== 'rider') return;
+    const isTwoLocation = selectedCategory === 'ride' || selectedCategory === 'delivery';
+    if (!isTwoLocation){ setPickup([e.latlng.lat, e.latlng.lng], "Dropped pin"); return; }
     if (!pickup) setPickup([e.latlng.lat, e.latlng.lng], "Dropped pin");
     else if (!drop) setDrop([e.latlng.lat, e.latlng.lng], "Dropped pin");
-    else { clearTripUI(false); setPickup([e.latlng.lat, e.latlng.lng], "Dropped pin"); }
+    else { resetPinsOnly(); setPickup([e.latlng.lat, e.latlng.lng], "Dropped pin"); }
   });
+}
+function resetPinsOnly(){
+  document.getElementById('fareInput').value=''; document.getElementById('pickupInput').value=''; document.getElementById('dropInput').value='';
+  pickup=null; drop=null;
+  if(pickupMarker){map.removeLayer(pickupMarker);pickupMarker=null;}
+  if(dropMarker){map.removeLayer(dropMarker);dropMarker=null;}
+  if (routeLine){ map.removeLayer(routeLine); routeLine=null; }
 }
 function pinIcon(cls, label){ return L.divIcon({className:'', html:`<div class="pin-label ${cls}">${label}</div>`, iconAnchor:[20,10]}); }
 async function setPickup(latlng, name){
@@ -579,27 +602,49 @@ function setDrop(latlng, name){ drop={latlng,name}; if(dropMarker) map.removeLay
 let selectedVehicleType = 'motorcycle';
 function recalcFare(){
   const note=document.getElementById('suggestedFareNote'), btn=document.getElementById('btnRequest');
-  if (pickup && drop){
-    const km = haversineKm(pickup.latlng, drop.latlng);
+  const isTwoLocation = selectedCategory === 'ride' || selectedCategory === 'delivery';
+  const isRecycling = selectedCategory === 'waste' && selectedVehicleType === 'recycling';
+  const sub = selectedCategoryDef?.subTypes.find(s=>s.value===selectedVehicleType);
+  const pricingModel = sub?.pricingModel || 'negotiate';
+
+  const locationReady = isTwoLocation ? (pickup && drop) : !!pickup;
+  if (!locationReady){ note.textContent = isTwoLocation ? "Set both points to see a suggested fare." : "Set your location to continue."; btn.disabled = true; return; }
+
+  if (pricingModel === 'fixed_by_provider'){
     btn.disabled = false;
-    note.textContent = `${km.toFixed(1)} km trip · checking a fair starting price…`;
-    socket.emit('fare:suggest', { vehicleType: selectedVehicleType, km }, (res)=>{
-      if (!res || res.error){
-        // server unreachable — fall back to the plain formula so the app still works
-        const s = suggestFare(km, selectedVehicleType);
-        note.textContent = `${km.toFixed(1)} km trip · typical fare ~${currentCurrency} ${fmtUGX(s)}`;
-        if (!document.getElementById('fareInput').value) document.getElementById('fareInput').value = s;
-        return;
-      }
-      let noteText = `${km.toFixed(1)} km trip · typical fare ~${currentCurrency} ${fmtUGX(res.suggestedFare)}`;
-      if (res.demandMultiplier > 1) noteText += ' · busy right now';
-      if (res.timeMultiplier > 1) noteText += ' · peak hours';
-      if (res.penaltyApplied) noteText += ' · includes a small adjustment from your last cancelled trip';
-      note.textContent = noteText;
-      if (!document.getElementById('fareInput').value) document.getElementById('fareInput').value = res.suggestedFare;
-    });
-  } else { note.textContent = "Set both points to see a suggested fare."; btn.disabled = true; }
+    note.textContent = "Providers set their own rate — you'll see it before confirming.";
+    return;
+  }
+
+  const km = isTwoLocation ? haversineKm(pickup.latlng, drop.latlng)
+           : isRecycling ? (parseFloat(document.getElementById('weightInput').value) || 0)
+           : 0;
+  if (isRecycling && km <= 0){ note.textContent = "Enter how many kilograms of recyclables you have."; btn.disabled = true; return; }
+
+  btn.disabled = false;
+  socket.emit('fare:suggest', { vehicleType: selectedVehicleType, km, serviceCategory: selectedCategory }, (res)=>{
+    if (!res || res.error){
+      note.textContent = isTwoLocation ? `${km.toFixed(1)} km trip` : 'Ready to send your request.';
+      return;
+    }
+    if (res.fixed){
+      document.getElementById('fareInput').value = res.suggestedFare;
+      note.textContent = isRecycling
+        ? `${km} kg × ${res.currency} ${fmtUGX(res.perKg)}/kg = ${res.currency} ${fmtUGX(res.suggestedFare)} you'll be paid`
+        : `The collection fee is ${res.currency} ${fmtUGX(res.suggestedFare)}`;
+      return;
+    }
+    let noteText = isTwoLocation
+      ? `${km.toFixed(1)} km trip · typical ${res.negotiationLabel} ~${res.currency} ${fmtUGX(res.suggestedFare)}`
+      : `Typical ${res.negotiationLabel} ~${res.currency} ${fmtUGX(res.suggestedFare)}`;
+    if (res.demandMultiplier > 1) noteText += ' · busy right now';
+    if (res.timeMultiplier > 1) noteText += ' · peak hours';
+    if (res.penaltyApplied) noteText += ' · includes a small adjustment from your last cancelled trip';
+    note.textContent = noteText;
+    if (!document.getElementById('fareInput').value) document.getElementById('fareInput').value = res.suggestedFare;
+  });
 }
+document.getElementById('weightInput').addEventListener('input', recalcFare);
 
 /* ---------------- Geocoding (Nominatim, free) ---------------- */
 let geoTimer;
@@ -629,38 +674,132 @@ function wireSearch(inputId, listId, onPick){
 }
 
 /* ---------------- Rider flow ---------------- */
-function showStep(id){ ['stepPlan','stepSearching','stepBids','stepTrip','stepDone'].forEach(s=>document.getElementById(s).classList.toggle('hidden', s!==id)); }
+function showStep(id){ ['stepCategoryPicker','stepPlan','stepSearching','stepBids','stepTrip','stepDone'].forEach(s=>document.getElementById(s).classList.toggle('hidden', s!==id)); }
 
 function clearTripUI(resetMap=true){
-  showStep('stepPlan');
-  document.getElementById('fareInput').value=''; document.getElementById('pickupInput').value=''; document.getElementById('dropInput').value='';
+  showStep('stepCategoryPicker');
+  document.getElementById('fareInput').value=''; document.getElementById('pickupInput').value=''; document.getElementById('dropInput').value=''; document.getElementById('weightInput').value='';
   myRequestId=null; myThreads={};
   if (resetMap){ pickup=null; drop=null; if(pickupMarker){map.removeLayer(pickupMarker);pickupMarker=null;} if(dropMarker){map.removeLayer(dropMarker);dropMarker=null;} }
   if (driverMarker){ map.removeLayer(driverMarker); driverMarker=null; }
   if (routeLine){ map.removeLayer(routeLine); routeLine=null; }
+}
+
+/* ---------------- Category picker + dynamic request form ---------------- */
+const CATEGORY_ICONS = { ride: '🚗', delivery: '📦', household: '🔧', waste: '🗑', gig: '💼' };
+let riderCategoriesList = [];
+let selectedCategory = 'ride';
+let selectedCategoryDef = null;
+
+async function loadRiderCategories(){
+  try{ riderCategoriesList = (await (await fetch('/api/config/categories')).json()).categories || []; }
+  catch(e){ riderCategoriesList = []; }
+  const grid = document.getElementById('categoryGrid');
+  grid.innerHTML = riderCategoriesList.map(c => `
+    <button class="category-card" data-cat="${c.code}">
+      <span class="cat-icon">${CATEGORY_ICONS[c.code] || '❓'}</span>
+      <span class="cat-label">${c.label}</span>
+    </button>
+  `).join('');
+  grid.querySelectorAll('.category-card').forEach(btn=>{
+    btn.onclick = ()=> selectCategory(btn.dataset.cat);
+  });
+}
+document.getElementById('btnBackToCategories').onclick = ()=> showStep('stepCategoryPicker');
+
+function selectCategory(code){
+  selectedCategory = code;
+  selectedCategoryDef = riderCategoriesList.find(c=>c.code===code);
+  if (!selectedCategoryDef) return;
+
+  // Title/subtitle
+  document.getElementById('stepPlanTitle').textContent =
+    selectedCategoryDef.requiresVehicle || code==='ride' || code==='delivery' ? 'Where to?' : 'Where do you need this?';
+  document.getElementById('stepPlanSub').textContent = 'Tap the map to drop a pin, or search below.';
+
+  // Sub-type toggle, built fresh for this category
+  const toggle = document.getElementById('subtypeToggle');
+  toggle.innerHTML = selectedCategoryDef.subTypes.map((s,i) =>
+    `<button class="vtype-btn${i===0?' active':''}" data-type="${s.value}">${s.label}</button>`
+  ).join('');
+  selectedVehicleType = selectedCategoryDef.subTypes[0].value;
+  toggle.querySelectorAll('.vtype-btn').forEach(btn=>{
+    btn.onclick = ()=>{
+      toggle.querySelectorAll('.vtype-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedVehicleType = btn.dataset.type;
+      document.getElementById('fareInput').value = '';
+      configureFareUIForSelection();
+      recalcFare();
+    };
+  });
+
+  // Single-location categories (household, gig, waste) reuse the pickup
+  // point as both pickup and drop — there's no real "route" for a
+  // plumber visit or a rubbish collection the way there is for a ride.
+  const isTwoLocation = code === 'ride' || code === 'delivery';
+  document.getElementById('dropFieldWrap').classList.toggle('hidden', !isTwoLocation);
+  document.getElementById('pickupInput').placeholder = isTwoLocation ? 'Pickup location' : 'Your location';
+
+  configureFareUIForSelection();
+  showStep('stepPlan');
+}
+
+// Configures the fare row, weight input, and button label based on the
+// CURRENTLY selected sub-type's pricing model — this can differ within
+// one category (waste collection is platform-fixed, recycling is
+// per-kilogram, both live under "Waste & recycling").
+function configureFareUIForSelection(){
+  const sub = selectedCategoryDef?.subTypes.find(s=>s.value===selectedVehicleType);
+  const pricingModel = sub?.pricingModel || 'negotiate';
+  const isRecycling = selectedCategory === 'waste' && selectedVehicleType === 'recycling';
+
+  document.getElementById('weightFieldWrap').classList.toggle('hidden', !isRecycling);
+  const fareInput = document.getElementById('fareInput');
+  const btn = document.getElementById('btnRequest');
+
+  if (pricingModel === 'negotiate'){
+    fareInput.disabled = false;
+    document.getElementById('fareRowWrap').classList.remove('hidden');
+    btn.textContent = `Propose this ${selectedCategoryDef.negotiationLabel}`;
+  } else if (pricingModel === 'fixed_by_provider'){
+    document.getElementById('fareRowWrap').classList.add('hidden');
+    document.getElementById('suggestedFareNote').textContent = "Providers set their own rate — you'll see it before confirming.";
+    btn.textContent = 'Post request';
+  } else if (pricingModel === 'fixed_platform_rate' || pricingModel === 'fixed_per_kg'){
+    fareInput.disabled = true;
+    document.getElementById('fareRowWrap').classList.remove('hidden');
+    btn.textContent = isRecycling ? "Request pickup — you'll be paid" : 'Post request';
+  }
   recalcFare();
 }
 
-document.querySelectorAll('.vtype-btn').forEach(btn=>{
-  btn.onclick = ()=>{
-    document.querySelectorAll('.vtype-btn').forEach(b=>b.classList.remove('active'));
-    btn.classList.add('active');
-    selectedVehicleType = btn.dataset.type;
-    document.getElementById('fareInput').value = ''; // let a new suggestion fill in for the new vehicle type
-    recalcFare();
-  };
-});
 
 document.getElementById('btnRequest').onclick = ()=>{
-  currentFare = parseInt(document.getElementById('fareInput').value, 10);
-  if (!currentFare || currentFare<=0){ toast('Enter a fare amount'); return; }
-  const km = haversineKm(pickup.latlng, drop.latlng);
+  const isTwoLocation = selectedCategory === 'ride' || selectedCategory === 'delivery';
+  const isRecycling = selectedCategory === 'waste' && selectedVehicleType === 'recycling';
+  const sub = selectedCategoryDef?.subTypes.find(s=>s.value===selectedVehicleType);
+  const pricingModel = sub?.pricingModel || 'negotiate';
+
+  const dropPoint = isTwoLocation ? drop : pickup; // single-location categories: same point for both, no real "route"
+  const km = isTwoLocation ? haversineKm(pickup.latlng, dropPoint.latlng)
+           : isRecycling ? (parseFloat(document.getElementById('weightInput').value) || 0)
+           : 0;
+
+  if (pricingModel === 'negotiate'){
+    currentFare = parseInt(document.getElementById('fareInput').value, 10);
+    if (!currentFare || currentFare<=0){ toast(`Enter a ${selectedCategoryDef.negotiationLabel} amount`); return; }
+  } else {
+    currentFare = parseInt(document.getElementById('fareInput').value, 10) || 0; // server is authoritative for fixed pricing regardless of what's sent
+  }
+
   document.getElementById('searchPickupName').textContent = pickup.name;
-  document.getElementById('searchFareShown').textContent = `${currentCurrency} ${fmtUGX(currentFare)}`;
+  document.getElementById('searchFareShown').textContent = pricingModel === 'fixed_by_provider'
+    ? "Waiting for a provider's rate…" : `${currentCurrency} ${fmtUGX(currentFare)}`;
   showStep('stepSearching');
   socket.emit('ride:create', {
-    pickup: pickup.latlng, drop: drop.latlng, pickupName: pickup.name, dropName: drop.name,
-    proposedFare: currentFare, vehicleType: selectedVehicleType, km
+    pickup: pickup.latlng, drop: dropPoint.latlng, pickupName: pickup.name, dropName: dropPoint.name,
+    proposedFare: currentFare, vehicleType: selectedVehicleType, serviceCategory: selectedCategory, km
   }, (res)=>{
     if (res && res.requestId) myRequestId = res.requestId;
   });
@@ -698,28 +837,33 @@ function renderThreads(){
     const div = document.createElement('div');
     div.className = 'thread-card';
     const vehicleLine = [t.vehicleColor, t.vehicleModel].filter(Boolean).join(' ') + (t.vehiclePlate ? ` · ${t.vehiclePlate}` : '');
+    const gettingPaid = t.moneyDirection === 'provider_pays_requester';
+    const isNegotiable = t.pricingModel === 'negotiate';
+    const acceptLabel = gettingPaid ? `Accept — you'll receive ${currentCurrency} ${fmtUGX(last.price)}` : `Accept ${currentCurrency} ${fmtUGX(last.price)}`;
     div.innerHTML = `
       <div class="thread-top">
         <div class="avatar">${initials(t.driverName)}</div>
         <div class="thread-name">${t.driverName}${vehicleLine.trim() !== '·' && vehicleLine.trim() ? `<div class="vehicle-line">${vehicleLine}</div>` : ''}</div>
-        <div class="thread-status">${last.by==='driver' ? 'their move' : 'waiting on them'}</div>
+        <div class="thread-status">${isNegotiable ? (last.by==='driver' ? 'their move' : 'waiting on them') : 'ready to book'}</div>
       </div>
       <div class="offer-trail">${t.offers.map(o=>`<span class="offer-chip ${o.by==='rider'?'mine':''}">${o.by==='rider'?'You':'Them'}: ${currentCurrency} ${fmtUGX(o.price)}</span>`).join('')}</div>
       <div class="thread-actions">
-        <button class="btn btn-primary btnAccept">Accept ${currentCurrency} ${fmtUGX(last.price)}</button>
-        <button class="btn btn-outline btnCounter">Counter</button>
+        <button class="btn btn-primary btnAccept">${acceptLabel}</button>
+        ${isNegotiable ? `<button class="btn btn-outline btnCounter">Counter</button>` : ''}
         <button class="btn btn-danger btnDecline">Decline</button>
       </div>
-      <div class="counter-row hidden"><input type="number" placeholder="Your counter (${currentCurrency})"><button class="btn btn-primary" style="margin-top:0;flex:none;padding:9px 14px;">Send</button></div>
+      ${isNegotiable ? `<div class="counter-row hidden"><input type="number" placeholder="Your counter (${currentCurrency})"><button class="btn btn-primary" style="margin-top:0;flex:none;padding:9px 14px;">Send</button></div>` : ''}
     `;
     div.querySelector('.btnAccept').onclick = ()=> socket.emit('thread:accept', {threadId:t.id});
     div.querySelector('.btnDecline').onclick = ()=> socket.emit('thread:decline', {threadId:t.id, by:'rider'});
-    div.querySelector('.btnCounter').onclick = ()=> div.querySelector('.counter-row').classList.remove('hidden');
-    div.querySelector('.counter-row button').onclick = ()=>{
-      const v = parseInt(div.querySelector('.counter-row input').value, 10);
-      if (!v){ toast('Enter an amount'); return; }
-      socket.emit('thread:offer', {threadId:t.id, price:v, by:'rider'});
-    };
+    if (isNegotiable){
+      div.querySelector('.btnCounter').onclick = ()=> div.querySelector('.counter-row').classList.remove('hidden');
+      div.querySelector('.counter-row button').onclick = ()=>{
+        const v = parseInt(div.querySelector('.counter-row input').value, 10);
+        if (!v){ toast('Enter an amount'); return; }
+        socket.emit('thread:offer', {threadId:t.id, price:v, by:'rider'});
+      };
+    }
     wrap.appendChild(div);
   });
 }
@@ -730,18 +874,22 @@ socket.on('ride:matched', (info)=>{
     document.getElementById('tripAvatar').textContent = initials(info.counterpartName);
     document.getElementById('tripDriverName').textContent = info.counterpartName;
     const vehicleBits = [info.vehicleColor, info.vehicleModel].filter(Boolean).join(' ');
-    document.getElementById('tripCarInfo').innerHTML = `${vehicleBits ? vehicleBits + ' · ' : ''}${info.vehiclePlate ? `<b>${info.vehiclePlate}</b> · ` : ''}Fare agreed at ${currentCurrency} ${fmtUGX(info.price)}`;
-    document.getElementById('tripStatusText').innerHTML = `<b>Driver is on the way</b> to your pickup point.`;
+    const gettingPaid = info.moneyDirection === 'provider_pays_requester';
+    const label = info.negotiationLabel || 'fare';
+    document.getElementById('tripCarInfo').innerHTML = `${vehicleBits ? vehicleBits + ' · ' : ''}${info.vehiclePlate ? `<b>${info.vehiclePlate}</b> · ` : ''}${gettingPaid ? "You'll receive" : label.charAt(0).toUpperCase()+label.slice(1)+' agreed at'} ${currentCurrency} ${fmtUGX(info.price)}`;
+    document.getElementById('tripStatusText').innerHTML = `<b>${info.counterpartName} is on the way</b> to your location.`;
     document.getElementById('btnCallDriver').href = info.counterpartPhone ? `tel:${info.counterpartPhone}` : '#';
     document.getElementById('riderChatMessages').innerHTML = '';
     document.getElementById('riderChatPanel').classList.add('hidden');
+    document.getElementById('btnPayByCard').classList.toggle('hidden', gettingPaid); // can't "pay" through the app when you're the one being paid
     showStep('stepTrip');
     spawnDriverOnMap();
-    toast(`Matched at ${currentCurrency} ${fmtUGX(info.price)}`);
+    toast(gettingPaid ? `Matched — you'll receive ${currentCurrency} ${fmtUGX(info.price)}` : `Matched at ${currentCurrency} ${fmtUGX(info.price)}`);
   } else {
-    toast(`Ride confirmed with ${info.counterpartName} at ${currentCurrency} ${fmtUGX(info.price)}`);
+    toast(`Confirmed with ${info.counterpartName} at ${currentCurrency} ${fmtUGX(info.price)}`);
     renderActiveTrip(info);
     renderDriverRequests();
+    spawnRiderOnMap(info.pickup);
   }
 });
 let currentDriverTrip = null;
@@ -825,6 +973,8 @@ function sendDriverChat(text){
 }
 socket.on('trip:cancelledByRider', ({threadId, penalized})=>{
   currentDriverTrip = null;
+  stopSharingMyLocation();
+  if (riderLocationMarker){ map.removeLayer(riderLocationMarker); riderLocationMarker = null; }
   document.getElementById('activeTripCard').classList.add('hidden');
   toast(penalized ? 'Rider cancelled after you arrived — noted on their account' : 'Rider cancelled the trip');
   renderDriverRequests();
@@ -835,21 +985,56 @@ socket.on('ride:closed', ({requestId})=>{
   renderDriverRequests();
 });
 
-function spawnDriverOnMap(){
-  if (!pickup || !drop) return;
-  const jitter = 0.01;
-  const start = [pickup.latlng[0]+(Math.random()-0.5)*jitter*2, pickup.latlng[1]+(Math.random()-0.5)*jitter*2];
-  driverMarker = L.marker(start, {icon:pinIcon('driver','Driver')}).addTo(map);
-  routeLine = L.polyline([start, pickup.latlng], {color:'#2F7A5E', weight:3, dashArray:'6,6'}).addTo(map);
-  map.fitBounds(L.latLngBounds([start, pickup.latlng, drop.latlng]), {padding:[70,90]});
-  let steps=0; const totalSteps=18;
-  const t = setInterval(()=>{
-    steps++;
-    const p = steps/totalSteps;
-    driverMarker.setLatLng([start[0]+(pickup.latlng[0]-start[0])*p, start[1]+(pickup.latlng[1]-start[1])*p]);
-    if (steps>=totalSteps){ clearInterval(t); document.getElementById('tripEta').textContent='Arrived'; document.getElementById('tripStatusText').innerHTML = `<b>${matchedInfo.counterpartName} has arrived</b> at the pickup point.`; }
-  }, 700);
+/* ---------------- Real-time location sharing ---------------- */
+// Each side shares its OWN real device location while a trip is
+// active, throttled to avoid flooding the connection — watchPosition
+// can fire far more often than is useful to actually send. Silently
+// does nothing if location permission is denied, same reasoning as the
+// GPS country-detection: a trip should still work without it.
+let myLocationWatchId = null;
+let lastLocationSentAt = 0;
+const LOCATION_SEND_INTERVAL_MS = 3000;
+
+function startSharingMyLocation(threadId){
+  if (!navigator.geolocation || myLocationWatchId !== null) return;
+  myLocationWatchId = navigator.geolocation.watchPosition((pos)=>{
+    const now = Date.now();
+    if (now - lastLocationSentAt < LOCATION_SEND_INTERVAL_MS) return;
+    lastLocationSentAt = now;
+    socket.emit('location:update', { threadId, lat: pos.coords.latitude, lng: pos.coords.longitude });
+  }, ()=>{ /* permission denied or unavailable — trip still works without live tracking */ }, { enableHighAccuracy: true, maximumAge: 5000 });
 }
+function stopSharingMyLocation(){
+  if (myLocationWatchId !== null){ navigator.geolocation.clearWatch(myLocationWatchId); myLocationWatchId = null; }
+  lastLocationSentAt = 0;
+}
+
+// Rider's view of the driver's real position
+function spawnDriverOnMap(){
+  if (!pickup) return;
+  if (driverMarker) map.removeLayer(driverMarker);
+  driverMarker = L.marker(pickup.latlng, {icon:pinIcon('driver','Driver')}).addTo(map); // placeholder until the first real update arrives
+  map.setView(pickup.latlng, 15);
+  if (matchedInfo?.threadId) startSharingMyLocation(matchedInfo.threadId);
+}
+
+// Driver's view of the rider's real position — reuses the same shared
+// map element (it's already visible behind the driver's own sheet).
+let riderLocationMarker = null;
+function spawnRiderOnMap(pickupLatLng){
+  if (riderLocationMarker) map.removeLayer(riderLocationMarker);
+  if (pickupLatLng) riderLocationMarker = L.marker(pickupLatLng, {icon:pinIcon('pickup','Rider')}).addTo(map);
+  if (currentDriverTrip?.threadId) startSharingMyLocation(currentDriverTrip.threadId);
+}
+
+socket.on('location:update', ({ lat, lng, from })=>{
+  if (from === 'driver' && driverMarker){ driverMarker.setLatLng([lat, lng]); }
+  if (from === 'rider' && role === 'driver'){
+    if (!riderLocationMarker) riderLocationMarker = L.marker([lat, lng], {icon:pinIcon('pickup','Rider')}).addTo(map);
+    else riderLocationMarker.setLatLng([lat, lng]);
+    map.setView([lat, lng], 15);
+  }
+});
 socket.on('trip:driverArrived', ({threadId})=>{
   if (!matchedInfo || matchedInfo.threadId !== threadId) return;
   document.getElementById('tripEta').textContent = 'Arrived';
@@ -942,6 +1127,7 @@ document.getElementById('btnCancelTrip').onclick = ()=>{
 socket.on('trip:cancelConfirmed', ({penalized})=>{
   toast(penalized ? 'Trip cancelled — noted since your driver had already arrived' : 'Trip cancelled');
   matchedInfo = null;
+  stopSharingMyLocation();
   clearTripUI();
 });
 
@@ -1002,6 +1188,7 @@ document.querySelectorAll('#starRow .star').forEach(star=>{
 });
 
 socket.on('trip:completed', (info)=>{
+  stopSharingMyLocation();
   if (info.role === 'rider'){
     document.getElementById('doneFareShown').textContent = `${info.paidByCard ? 'Paid by card: ' : ''}${currentCurrency} ${fmtUGX(info.price)}${info.paidByCard ? '' : ' paid to ' + info.driverName}`;
     selectedRatingStars = 0;
@@ -1010,6 +1197,7 @@ socket.on('trip:completed', (info)=>{
   } else {
     // driver side
     currentDriverTrip = null;
+    if (riderLocationMarker){ map.removeLayer(riderLocationMarker); riderLocationMarker = null; }
     document.getElementById('activeTripCard').classList.add('hidden');
     if (info.paidByCard){
       toast(`Trip complete — paid out to your mobile money, minus ${Math.round(currentCommissionRate*100)}% commission`);
@@ -1536,9 +1724,9 @@ document.getElementById('btnDriverLogin').onclick = async ()=>{
 /* ---------------- Init ---------------- */
 initMap();
 detectCountryFromGPS();
+loadRiderCategories();
 wireSearch('pickupInput','suggestPickup', setPickup);
 wireSearch('dropInput','suggestDrop', setDrop);
-recalcFare();
 </script>
 </body>
 </html>

@@ -915,3 +915,137 @@ waste pickup, or gig help. Activating the categories and enabling
 multi-category providers was real, necessary groundwork, but a
 customer literally cannot request anything but a ride until that
 screen exists. That's the next real piece of work, not yet started.
+
+## The rider-facing request flow — now built for all five categories
+
+This closes the real gap flagged earlier: activating categories on the
+provider side didn't give customers any way to actually request them.
+That's fixed now.
+
+### What a rider sees now
+1. **"What do you need?"** — a picker screen with all five categories,
+   shown before anything else
+2. **A form that adapts to what they picked**:
+   - **Ride / Delivery** — the familiar two-point map (pickup + drop),
+     sub-type choice (motorcycle/car for rides; motorcycle/bicycle/on
+     foot for delivery), and a negotiable price they propose
+   - **Household services / Gig work** — a single location (no route —
+     there's no "drop-off" for a plumber visit), sub-type choice
+     (plumbing/electrical/cleaning/other; errands/manual
+     labour/digital)
+   - **Waste collection** — single location, no price to propose — the
+     exact fixed platform fee is shown before they even request it
+   - **Recycling** — single location plus a "how many kg?" field, with
+     the exact payout calculated live (kg × the country's per-kg rate)
+     and clearly labeled as money they'll **receive**, not pay
+
+### Fixed-price categories no longer show a fake negotiation
+Offer cards now check the thread's real pricing model — for household,
+waste, and recycling, the "Counter" button and input are gone entirely,
+matching what the server already enforced (counter-offers were already
+blocked server-side; the UI now honestly reflects that instead of
+showing a button that would silently fail).
+
+### Recycling's reversed money flow is handled honestly in the UI
+Since a recycler pays the household, not the other way around: the
+accept button says "Accept — you'll receive X" instead of "Accept X",
+the matched-trip screen says "You'll receive" instead of "Fare agreed
+at", and the **"Pay by Card" button is hidden entirely** for recycling
+— it would never have made sense for the person being paid to also be
+prompted to pay.
+
+### Commission collection — confirmed still works for every category
+No new payment logic was needed here: the driver-marks-complete (cash)
+and rider-pays-by-card flows both already resolved the correct
+category-specific commission rate from earlier work in this session.
+Verified directly with a fresh test: a waste-collection fare of a fixed
+platform rate, and a recycling payout calculated per-kilogram, both
+came through the exact right numbers via the live `fare:suggest`
+endpoint before ever reaching a real request.
+
+### Safety features — confirmed untouched
+Direct calling, in-app chat, the safety/customer-care button, and trip
+sharing all operate generically off the matched-trip data, regardless
+of category — verified they weren't accidentally broken by this rework
+rather than assumed.
+
+### Full regression re-run
+Every existing test in the project — vehicle matching, payments, chat,
+card payments with commission, multi-category providers, fixed
+pricing, service category isolation — still passes unchanged after this
+rebuild.
+
+## Honest answer: map locations are not real yet, plus a bug fix
+
+Asked directly whether the map shows real locations of the requester
+and provider to each other. The honest answer, checked directly rather
+than assumed:
+
+- **Rider's own pickup/drop pins are real** — they set those themselves
+- **The "driver" marker shown after matching is simulated** — a fake
+  marker with a randomized starting position that animates toward the
+  pickup point. This is NOT the real driver's live GPS location. This
+  has been a known limitation since the very first version of this
+  app — real GPS tracking has never been built.
+- **The driver's screen has no map at all** — it's a list of cards
+  (pickup name, distance, price), never shows the rider's location
+  visually.
+
+### Bug found and fixed while checking this
+The simulated driver marker didn't appear **at all** for the newer
+single-location categories (household, gig, waste, recycling) —
+`spawnDriverOnMap()` required both a pickup AND a drop point to exist
+before showing anything, but single-location categories never set a
+distinct drop point. Fixed by falling back to the pickup point itself
+as the destination for map-fitting purposes when there's no real drop
+point, matching how the rest of the single-location flow already works.
+
+### What real GPS tracking would actually require
+Worth naming clearly since it's a real, sizeable feature, not a small
+tweak: continuously streaming each phone's actual location over the
+existing socket connection (`navigator.geolocation.watchPosition()` on
+each device, relayed through the server to the other party), updating
+both markers live rather than animating a fake one. Not built — this
+is genuine future work if real live tracking matters more than the
+current simulation.
+
+## Real GPS tracking — the simulated marker is gone, replaced with real device locations
+
+Following up on the honest gap flagged earlier ("this doesn't show real
+locations, it's a fake animation") — real, bidirectional location
+sharing is now built.
+
+### How it works
+- Once a trip is genuinely **matched** (not during open bidding — a
+  deliberate privacy boundary), each side's device starts sharing its
+  own real GPS location via `navigator.geolocation.watchPosition()`
+- Locations are relayed through the server, throttled to once every 3
+  seconds so a fast-updating GPS doesn't flood the connection
+- **The rider's map** now shows the driver's real marker, moving as
+  they actually move — no more scripted animation toward the pickup
+  point
+- **The driver's screen now has a live map view for the first time** —
+  reusing the same shared map element that already sat behind the
+  driver's card-based interface, showing the rider's real location
+- Location sharing stops the moment a trip completes or is cancelled,
+  on both sides — no lingering tracking after a trip ends
+
+### The privacy boundary, tested directly
+The server **refuses to relay any location update sent before a thread
+is actually matched** — confirmed with a real test: a location sent
+during open bidding correctly reached nobody, while the identical
+message sent one step later, after acceptance, correctly reached the
+other party. This isn't incidental; the server checks `thread.status
+=== 'accepted'` before relaying anything at all.
+
+### Honest limits
+- If either side denies location permission, the trip still works —
+  it just falls back to no live marker for that side, same graceful
+  degradation used elsewhere in the app (e.g. the earlier
+  GPS-based country detection)
+- The actual `navigator.geolocation` browser behavior couldn't be
+  exercised in this development sandbox (there's no real device or
+  browser here) — the relay logic itself was tested directly and
+  proven correct, but the on-device experience (permission prompts,
+  how smoothly a real phone's GPS updates the marker) needs a real
+  phone to fully confirm

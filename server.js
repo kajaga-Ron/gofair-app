@@ -443,6 +443,9 @@ function threadPublicView(t) {
   return {
     id: t.id, requestId: t.requestId, driverName: t.driverName,
     vehiclePlate: t.vehiclePlate, vehicleModel: t.vehicleModel, vehicleColor: t.vehicleColor,
+    pricingModel: t.pricingModel, serviceCategory: t.serviceCategory, vehicleType: t.vehicleType,
+    negotiationLabel: categories.getCategory(t.serviceCategory || 'ride').negotiationLabel,
+    moneyDirection: categories.moneyDirectionFor(t.serviceCategory || 'ride', t.vehicleType),
     offers: t.offers, status: t.status
   };
 }
@@ -627,6 +630,24 @@ io.on('connection', (socket) => {
       return ack({ error: 'Invalid request' });
     }
     const country = socket.data.country || config.DEFAULT_COUNTRY;
+    const pricingModel = categories.pricingModelFor(category, vehicleType);
+    const negotiationLabel = categories.getCategory(category).negotiationLabel;
+    const currency = config.getCountry(country).currency;
+
+    if (pricingModel === 'fixed_platform_rate') {
+      const fee = (getWasteRates(country).collectionFee) || 0;
+      return ack({ suggestedFare: fee, currency, negotiationLabel, fixed: true });
+    }
+    if (pricingModel === 'fixed_per_kg') {
+      const perKg = (getWasteRates(country).recyclingPerKg) || 0;
+      return ack({ suggestedFare: Math.round(perKg * km), currency, negotiationLabel, fixed: true, perKg });
+    }
+    if (pricingModel === 'fixed_by_provider') {
+      // No suggestion is possible here — each provider sets their own
+      // rate, which isn't known until one actually picks up the request.
+      return ack({ suggestedFare: null, currency, negotiationLabel, fixed: true, setByProvider: true });
+    }
+
     const base = baseFareForKm(km, vehicleType, country);
     const tMult = timeOfDayMultiplier();
     const dMult = demandMultiplier(country, category, vehicleType);
@@ -638,8 +659,8 @@ io.on('connection', (socket) => {
     const suggested = roundToNearest(base * tMult * dMult * (1 + penaltyPct), 500);
     ack({
       suggestedFare: suggested,
-      currency: config.getCountry(country).currency,
-      negotiationLabel: categories.getCategory(category).negotiationLabel,
+      currency,
+      negotiationLabel,
       demandMultiplier: dMult,
       timeMultiplier: tMult,
       penaltyApplied: penaltyPct > 0,
@@ -647,6 +668,9 @@ io.on('connection', (socket) => {
     });
   });
 
+  function getWasteRates(countryCode) {
+    return config.getCountry(countryCode).wasteRates || {};
+  }
   // Rider posts a new trip + proposed price, for a specific category + sub-type
   socket.on('ride:create', async (data, ack) => {
     if (socket.data.role !== 'rider') return ack && ack({ error: 'not a rider' });
@@ -784,13 +808,16 @@ async function resolveFixedPrice(pricingModel, driverRecord, request) {
 
     io.to(t.driverSocketId).emit('ride:matched', {
       threadId, price: finalPrice, role: 'driver', counterpartName: r ? r.riderName : 'Rider',
-      counterpartPhone: r ? r.riderPhone : null
+      counterpartPhone: r ? r.riderPhone : null, pickup: r ? r.pickup : null
     });
     if (r) {
       io.to(r.riderSocketId).emit('ride:matched', {
         threadId, price: finalPrice, role: 'rider', counterpartName: t.driverName,
         counterpartPhone: t.driverPhone,
-        vehiclePlate: t.vehiclePlate, vehicleModel: t.vehicleModel, vehicleColor: t.vehicleColor
+        vehiclePlate: t.vehiclePlate, vehicleModel: t.vehicleModel, vehicleColor: t.vehicleColor,
+        serviceCategory: t.serviceCategory || 'ride', vehicleType: t.vehicleType,
+        negotiationLabel: categories.getCategory(t.serviceCategory || 'ride').negotiationLabel,
+        moneyDirection: categories.moneyDirectionFor(t.serviceCategory || 'ride', t.vehicleType)
       });
       for (const [tid2, t2] of threads) {
         if (t2.requestId === r.id && tid2 !== threadId && t2.status === 'open') {
@@ -843,6 +870,21 @@ async function resolveFixedPrice(pricingModel, driverRecord, request) {
     const payload = { threadId, from, text: trimmed, ts: Date.now() };
     if (from === 'driver' && t.riderSocketId) io.to(t.riderSocketId).emit('chat:message', payload);
     if (from === 'rider' && t.driverSocketId) io.to(t.driverSocketId).emit('chat:message', payload);
+  });
+
+  // Real-time location sharing — only relayed once a thread is actually
+  // matched ('accepted'), never during open bidding, and only ever to
+  // the OTHER party in that specific thread. This replaces what used to
+  // be a simulated, fake-animated driver marker with each side's real
+  // device location.
+  socket.on('location:update', ({ threadId, lat, lng }) => {
+    const t = threads.get(threadId);
+    if (!t || t.status !== 'accepted' || typeof lat !== 'number' || typeof lng !== 'number') return;
+    if (t.driverSocketId === socket.id && t.riderSocketId) {
+      io.to(t.riderSocketId).emit('location:update', { threadId, lat, lng, from: 'driver' });
+    } else if (t.riderSocketId === socket.id && t.driverSocketId) {
+      io.to(t.driverSocketId).emit('location:update', { threadId, lat, lng, from: 'rider' });
+    }
   });
 
   socket.on('trip:arrived', ({ threadId }) => {
