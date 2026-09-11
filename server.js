@@ -25,6 +25,9 @@ const drivers = require('./drivers');
 const riders = require('./riders');
 const ratings = require('./ratings');
 const payments = require('./payments');
+const trips = require('./trips');
+const shops = require('./shops');
+const settings = require('./settings');
 
 const app = express();
 const server = http.createServer(app);
@@ -46,6 +49,43 @@ app.get('/api/config/countries', (req, res) => {
 
 app.get('/api/config/categories', (req, res) => {
   res.json({ categories: categories.publicCategoryList() });
+});
+
+// A sensible starting guess for the unit based on the item name (e.g.
+// "rice" -> kg, "fabric" -> meter) — the seller can always override it,
+// or pick "other" and describe the unit freely.
+app.get('/api/shop/suggest-unit', (req, res) => {
+  res.json({ unit: shops.suggestUnit(req.query.name) });
+});
+
+// Rider-facing: browse active listings from approved shops in a country.
+app.get('/api/shop/browse', async (req, res) => {
+  const country = config.isValidCountry(req.query.country) ? req.query.country : config.DEFAULT_COUNTRY;
+  res.json({ listings: await shops.browseListings(country) });
+});
+
+app.get('/api/driver/shop/listings', requireDriver, async (req, res) => {
+  res.json({ listings: await shops.listListingsForDriver(req.driver.id) });
+});
+
+app.post('/api/driver/shop/listings', requireDriver, async (req, res) => {
+  const { name, price, unit, unitCustomText, photo } = req.body || {};
+  const currency = config.getCountry(req.driver.country).currency;
+  const result = await shops.createListing(req.driver.id, { name, price: Number(price), unit, unitCustomText, currency, photo });
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.json({ listing: (await shops.listListingsForDriver(req.driver.id)).find(l => l.id === result.id) });
+});
+
+app.patch('/api/driver/shop/listings/:id', requireDriver, async (req, res) => {
+  const ok = await shops.setListingActive(req.params.id, req.driver.id, !!req.body?.active);
+  if (!ok) return res.status(404).json({ error: 'Listing not found' });
+  res.json({ ok: true });
+});
+
+app.delete('/api/driver/shop/listings/:id', requireDriver, async (req, res) => {
+  const ok = await shops.deleteListing(req.params.id, req.driver.id);
+  if (!ok) return res.status(404).json({ error: 'Listing not found' });
+  res.json({ ok: true });
 });
 
 app.post('/api/driver/register', async (req, res) => {
@@ -116,9 +156,15 @@ app.get('/api/admin/drivers', requireAdmin, async (req, res) => {
 app.get('/api/admin/drivers/:id/document/:field', requireAdmin, async (req, res) => {
   const { field } = req.params;
   if (!['document', 'selfie'].includes(field)) return res.status(400).end();
-  const diskPath = await drivers.getDocumentDiskPath(req.params.id, field);
-  if (!diskPath) return res.status(404).end();
-  res.sendFile(diskPath);
+  const result = await drivers.getDocumentDiskPath(req.params.id, field);
+  if (!result) return res.status(404).end();
+  if (result.data) {
+    const match = /^data:([^;]+);base64,(.+)$/.exec(result.data);
+    if (!match) return res.status(500).end();
+    res.set('Content-Type', match[1]);
+    return res.send(Buffer.from(match[2], 'base64'));
+  }
+  res.sendFile(result.diskPath); // legacy record — old on-disk file, still supported
 });
 
 app.post('/api/admin/drivers/:id/approve', requireAdmin, async (req, res) => {
@@ -215,6 +261,34 @@ app.post('/api/driver/wallet/topup-request', requireDriver, async (req, res) => 
   const result = await drivers.requestTopup(req.driver.id, Number(amount), momoRef);
   if (result.error) return res.status(400).json({ error: result.error });
   res.json({ entry: result.entry, wallet: await drivers.walletView(result.driver) });
+});
+
+// Withdraw wallet balance back to mobile money — for a driver who
+// topped up more than they needed, or is going inactive and wants
+// their deposit back.
+// Update a provider's fixed rate without forcing a full re-approval —
+// same verified identity, just a price change.
+app.post('/api/driver/profile/rate', requireDriver, async (req, res) => {
+  const { fixedRate, category, subType } = req.body || {};
+  const result = await drivers.updateFixedRate(req.driver.id, Number(fixedRate), category, subType);
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.json({ driver: drivers.publicDriverView(result.driver) });
+});
+
+app.post('/api/driver/wallet/withdraw', requireDriver, async (req, res) => {
+  const { amount } = req.body || {};
+  const amt = Number(amount);
+  if (!amt || amt <= 0) return res.status(400).json({ error: 'Enter a valid amount.' });
+  try {
+    const result = await drivers.requestWithdrawal(req.driver.id, amt);
+    if (result.error) {
+      const wallet = result.driver ? await drivers.walletView(result.driver) : undefined;
+      return res.status(400).json({ error: result.error, wallet });
+    }
+    res.json({ status: result.status, wallet: await drivers.walletView(result.driver) });
+  } catch (e) {
+    res.status(500).json({ error: 'Withdrawal failed — please try again.' });
+  }
 });
 
 // Real-time top-up via MTN MoMo, Airtel Money, or Visa/Mastercard: sends
@@ -336,7 +410,7 @@ app.post('/api/rider/fare/pay/initiate', async (req, res) => {
     return res.status(400).json({ error: 'This trip is not ready for payment, or the details don\'t match.' });
   }
   const currency = config.getCountry(t.country || config.DEFAULT_COUNTRY).currency;
-  const commissionRate = categories.commissionRateFor(t.serviceCategory || 'ride', t.vehicleType) ?? drivers.COMMISSION_RATE;
+  const commissionRate = await drivers.getEffectiveCommissionRate(t.serviceCategory || 'ride', t.vehicleType);
   const commission = Math.round(t.finalPrice * commissionRate);
 
   const payment = await drivers.createCardFarePayment({
@@ -392,6 +466,17 @@ app.get('/api/rider/fare/pay/:paymentId/status', async (req, res) => {
     const t = threads.get(payment.thread_id);
     if (t && t.status === 'accepted') {
       t.status = 'completed';
+      const r = requests.get(t.requestId);
+      await trips.recordTrip({
+        requestId: t.requestId, threadId: t.id, riderPhone: payment.rider_phone, riderName: r?.riderName,
+        driverId: payment.driver_id, driverName: t.driverName,
+        serviceCategory: t.serviceCategory || 'ride', vehicleType: t.vehicleType, country: r?.country || config.DEFAULT_COUNTRY,
+        currency: payment.currency,
+        pickupName: r?.pickupName, dropName: r?.dropName, pickup: r?.pickup, drop: r?.drop, km: r?.km,
+        finalPrice: payment.fare_amount, commissionAmount: payment.commission,
+        commissionRate: payment.fare_amount ? payment.commission / payment.fare_amount : null,
+        paymentMethod: 'card', status: 'completed', createdAt: r?.createdAt
+      });
       const driverSocketId = driverSocketsByDriverId.get(payment.driver_id);
       if (driverSocketId) io.to(driverSocketId).emit('trip:completed', { threadId: t.id, price: payment.fare_amount, role: 'driver', paidByCard: true });
       if (t.riderSocketId) io.to(t.riderSocketId).emit('trip:completed', { threadId: t.id, price: payment.fare_amount, role: 'rider', driverName: t.driverName, paidByCard: true });
@@ -403,6 +488,76 @@ app.get('/api/rider/fare/pay/:paymentId/status', async (req, res) => {
 });
 
 // ---------------- Wallet: admin-side ----------------
+
+// Real, permanent trip history — replaces "no historical record exists
+// anywhere" with an actual queryable list, for disputes, driver
+// disagreements, or basic accounting.
+app.get('/api/admin/trips', requireAdmin, async (req, res) => {
+  res.json({ trips: await trips.listRecentTrips(200) });
+});
+
+// Admin-editable rates and commission — the actual point of the
+// settings override system: change a price without a code deploy.
+app.get('/api/admin/settings/rates', requireAdmin, async (req, res) => {
+  const countries = Object.keys(config.COUNTRIES);
+  const cats = categories.publicCategoryList();
+  const rateRows = [];
+  for (const code of countries) {
+    const country = config.getCountry(code);
+    for (const vehicleType of Object.keys(country.rates)) {
+      const override = await settings.getRateOverride(code, vehicleType);
+      rateRows.push({ country: code, vehicleType, base: (override || country.rates[vehicleType]).base, perKm: (override || country.rates[vehicleType]).perKm, isOverridden: !!override });
+    }
+  }
+  const wasteRows = [];
+  for (const code of countries) {
+    const country = config.getCountry(code);
+    if (!country.wasteRates) continue;
+    const override = await settings.getWasteRateOverride(code);
+    wasteRows.push({ country: code, collectionFee: (override || country.wasteRates).collectionFee, recyclingPerKg: (override || country.wasteRates).recyclingPerKg, isOverridden: !!override });
+  }
+  const commissionRows = [];
+  for (const cat of cats) {
+    for (const sub of cat.subTypes) {
+      const rate = await drivers.getEffectiveCommissionRate(cat.code, sub.value);
+      const override = await settings.getCommissionOverride(cat.code, sub.value);
+      commissionRows.push({ category: cat.code, subType: sub.value, rate, isOverridden: override !== null });
+    }
+  }
+  res.json({ rates: rateRows, wasteRates: wasteRows, commissions: commissionRows });
+});
+
+app.post('/api/admin/settings/rate', requireAdmin, async (req, res) => {
+  const { country, vehicleType, base, perKm } = req.body || {};
+  if (!config.isValidCountry(country) || !vehicleType || !base || !perKm) return res.status(400).json({ error: 'Missing or invalid fields' });
+  await settings.setRateOverride(country, vehicleType, Number(base), Number(perKm));
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/settings/waste-rate', requireAdmin, async (req, res) => {
+  const { country, collectionFee, recyclingPerKg } = req.body || {};
+  if (!config.isValidCountry(country) || collectionFee == null || recyclingPerKg == null) return res.status(400).json({ error: 'Missing or invalid fields' });
+  await settings.setWasteRateOverride(country, Number(collectionFee), Number(recyclingPerKg));
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/settings/commission', requireAdmin, async (req, res) => {
+  const { category, subType, rate } = req.body || {};
+  if (!categories.isValidCategory(category) || !categories.isValidSubType(category, subType) || rate == null || rate < 0 || rate > 1) {
+    return res.status(400).json({ error: 'Missing or invalid fields — rate must be between 0 and 1' });
+  }
+  await settings.setCommissionOverride(category, subType, Number(rate));
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/settings/:type/:country/:key?', requireAdmin, async (req, res) => {
+  const { type, country, key } = req.params;
+  if (type === 'rate') await settings.deleteSetting(`rate:${country}:${key}`);
+  else if (type === 'waste-rate') await settings.deleteSetting(`wasteRate:${country}`);
+  else if (type === 'commission') await settings.deleteSetting(`commission:${country}:${key}`); // 'country' param reused as category here
+  else return res.status(400).json({ error: 'Unknown setting type' });
+  res.json({ ok: true });
+});
 
 app.get('/api/admin/topups', requireAdmin, async (req, res) => {
   res.json({ topups: await drivers.listPendingTopups() });
@@ -436,7 +591,8 @@ function requestPublicView(r) {
   return {
     id: r.id, riderName: r.riderName, pickup: r.pickup, drop: r.drop,
     pickupName: r.pickupName, dropName: r.dropName, proposedFare: r.proposedFare,
-    vehicleType: r.vehicleType, serviceCategory: r.serviceCategory || 'ride', country: r.country, km: r.km, status: r.status, createdAt: r.createdAt
+    vehicleType: r.vehicleType, serviceCategory: r.serviceCategory || 'ride', carTypeNote: r.carTypeNote || null,
+    country: r.country, km: r.km, status: r.status, createdAt: r.createdAt
   };
 }
 function threadPublicView(t) {
@@ -458,9 +614,10 @@ function driverRoom(country, category, subType) {
 // sync, but only this server-side version factors in real-time demand and
 // a rider's cancellation penalty — the client can't see either of those.
 
-function baseFareForKm(km, vehicleType, country) {
+async function baseFareForKm(km, vehicleType, country) {
+  const override = await settings.getRateOverride(country, vehicleType);
   const rates = config.getCountry(country).rates;
-  const r = rates[vehicleType] || rates.car;
+  const r = override || rates[vehicleType] || rates.car;
   return r.base + r.perKm * km;
 }
 
@@ -556,11 +713,11 @@ async function admitDriverIfEligible(socketId, driver) {
   socket.data.country = driver.country;
 
   if (driver.status !== 'approved') {
-    socket.emit('driver:status', { status: driver.status, reviewNote: driver.reviewNote });
+    socket.emit('driver:status', { status: driver.status, reviewNote: driver.reviewNote, serviceCategory: driver.serviceCategory });
     return;
   }
   const wallet = await drivers.walletView(driver);
-  socket.emit('driver:status', { status: 'approved', wallet });
+  socket.emit('driver:status', { status: 'approved', wallet, serviceCategory: driver.serviceCategory });
 
   // A driver can offer more than one category on the same verified
   // identity (e.g. ride + delivery on the same motorcycle) — each
@@ -635,11 +792,11 @@ io.on('connection', (socket) => {
     const currency = config.getCountry(country).currency;
 
     if (pricingModel === 'fixed_platform_rate') {
-      const fee = (getWasteRates(country).collectionFee) || 0;
+      const fee = (await getWasteRatesFor(country)).collectionFee || 0;
       return ack({ suggestedFare: fee, currency, negotiationLabel, fixed: true });
     }
     if (pricingModel === 'fixed_per_kg') {
-      const perKg = (getWasteRates(country).recyclingPerKg) || 0;
+      const perKg = (await getWasteRatesFor(country)).recyclingPerKg || 0;
       return ack({ suggestedFare: Math.round(perKg * km), currency, negotiationLabel, fixed: true, perKg });
     }
     if (pricingModel === 'fixed_by_provider') {
@@ -648,7 +805,7 @@ io.on('connection', (socket) => {
       return ack({ suggestedFare: null, currency, negotiationLabel, fixed: true, setByProvider: true });
     }
 
-    const base = baseFareForKm(km, vehicleType, country);
+    const base = await baseFareForKm(km, vehicleType, country);
     const tMult = timeOfDayMultiplier();
     const dMult = demandMultiplier(country, category, vehicleType);
     let penaltyPct = 0;
@@ -668,9 +825,6 @@ io.on('connection', (socket) => {
     });
   });
 
-  function getWasteRates(countryCode) {
-    return config.getCountry(countryCode).wasteRates || {};
-  }
   // Rider posts a new trip + proposed price, for a specific category + sub-type
   socket.on('ride:create', async (data, ack) => {
     if (socket.data.role !== 'rider') return ack && ack({ error: 'not a rider' });
@@ -693,8 +847,52 @@ io.on('connection', (socket) => {
       country, serviceCategory: category,
       pickup: data.pickup, drop: data.drop, pickupName: data.pickupName, dropName: data.dropName,
       proposedFare: data.proposedFare, vehicleType: data.vehicleType, km: data.km,
+      carTypeNote: data.carTypeNote && data.carTypeNote !== 'Any' ? data.carTypeNote : null,
       status: 'open', createdAt: Date.now()
     };
+
+    // Market is fundamentally different from every other category: the
+    // item and its price are already fixed by a specific shop's
+    // listing, so there's nothing to broadcast or negotiate — the
+    // order goes straight to that one seller and matches immediately.
+    if (category === 'market') {
+      const listing = await shops.getListing(data.listingId);
+      if (!listing || !listing.active || listing.shopStatus !== 'approved' || listing.shopCountry !== country) {
+        return ack && ack({ error: 'This item is no longer available.' });
+      }
+      r.proposedFare = listing.price;
+      r.listingId = listing.id;
+      r.listingName = listing.name;
+      r.status = 'matched';
+      requests.set(id, r);
+
+      const threadId = nextId('thr');
+      const driverSocketId = driverSocketsByDriverId.get(listing.driverId) || null;
+      const t = {
+        id: threadId, requestId: id, driverSocketId, driverId: listing.driverId,
+        driverName: listing.shopName, driverPhone: listing.shopPhone,
+        vehiclePlate: null, vehicleModel: null, vehicleColor: null,
+        pricingModel: 'per_listing', serviceCategory: category, vehicleType: data.vehicleType,
+        riderPhone: socket.data.riderPhone, riderSocketId: socket.id,
+        offers: [{ by: 'driver', price: listing.price, ts: Date.now() }],
+        status: 'accepted', finalPrice: listing.price
+      };
+      threads.set(threadId, t);
+
+      socket.emit('ride:matched', {
+        threadId, price: listing.price, role: 'rider', counterpartName: listing.shopName, counterpartPhone: listing.shopPhone,
+        serviceCategory: category, vehicleType: data.vehicleType,
+        negotiationLabel: `${listing.name} (${listing.unit === 'other' ? listing.unitCustomText : listing.unit})`,
+        moneyDirection: 'requester_pays_provider'
+      });
+      if (driverSocketId) {
+        io.to(driverSocketId).emit('ride:matched', {
+          threadId, price: listing.price, role: 'driver', counterpartName: r.riderName, counterpartPhone: r.riderPhone, pickup: r.pickup
+        });
+      }
+      return ack && ack({ requestId: id, threadId, matched: true });
+    }
+
     requests.set(id, r);
     await broadcastRideToRoomTiered(country, category, data.vehicleType, requestPublicView(r));
     ack && ack({ requestId: id });
@@ -719,19 +917,23 @@ io.on('connection', (socket) => {
 // isn't 'negotiate' — a driver's app could send any number it wants, but
 // for fixed pricing that number is never trusted; it's computed here
 // from the driver's own set rate or the country's published rate.
+async function getWasteRatesFor(countryCode) {
+  const override = await settings.getWasteRateOverride(countryCode);
+  return override || config.getCountry(countryCode).wasteRates || {};
+}
+
 async function resolveFixedPrice(pricingModel, driverRecord, request) {
-  const country = config.getCountry(request.country);
   if (pricingModel === 'fixed_by_provider') {
     const rate = await drivers.getEffectiveFixedRate(driverRecord, request.serviceCategory || 'ride', request.vehicleType);
     return rate || 0;
   }
-  if (pricingModel === 'fixed_platform_rate') return (country.wasteRates && country.wasteRates.collectionFee) || 0;
+  const wasteRates = await getWasteRatesFor(request.country);
+  if (pricingModel === 'fixed_platform_rate') return wasteRates.collectionFee || 0;
   if (pricingModel === 'fixed_per_kg') {
     // 'km' doubles as the recyclables' weight in kilograms for this
     // sub-type — reusing the existing field rather than adding a whole
     // separate quantity concept for one sub-type.
-    const perKg = (country.wasteRates && country.wasteRates.recyclingPerKg) || 0;
-    return Math.round(perKg * (request.km || 0));
+    return Math.round((wasteRates.recyclingPerKg || 0) * (request.km || 0));
   }
   return null; // 'negotiate' — caller should use the client-provided price instead
 }
@@ -838,14 +1040,26 @@ async function resolveFixedPrice(pricingModel, driverRecord, request) {
     if (!t || t.status !== 'accepted' || t.driverSocketId !== socket.id) return;
     t.status = 'completed';
 
-    const baseRate = categories.commissionRateFor(t.serviceCategory || 'ride', t.vehicleType);
-    const resolvedBaseRate = baseRate !== null ? baseRate : drivers.COMMISSION_RATE;
+    const resolvedBaseRate = await drivers.getEffectiveCommissionRate(t.serviceCategory || 'ride', t.vehicleType);
     const ratingSummary = await ratings.getDriverRatingSummary(t.driverId);
     const commissionRate = ratings.applyRewardDiscount(resolvedBaseRate, ratingSummary);
     const result = await drivers.deductCommission(t.driverId, t.finalPrice, commissionRate);
     if (!result.error) {
       socket.emit('wallet:update', await drivers.walletView(result.driver));
     }
+
+    const r = requests.get(t.requestId);
+    const country = r?.country || socket.data.country || config.DEFAULT_COUNTRY;
+    await trips.recordTrip({
+      requestId: t.requestId, threadId, riderPhone: t.riderPhone, riderName: r?.riderName,
+      driverId: t.driverId, driverName: t.driverName,
+      serviceCategory: t.serviceCategory || 'ride', vehicleType: t.vehicleType, country,
+      currency: config.getCountry(country).currency,
+      pickupName: r?.pickupName, dropName: r?.dropName, pickup: r?.pickup, drop: r?.drop, km: r?.km,
+      finalPrice: t.finalPrice, commissionAmount: result.commission, commissionRate,
+      paymentMethod: 'cash', status: 'completed', createdAt: r?.createdAt
+    });
+
     socket.emit('trip:completed', { threadId, price: t.finalPrice, role: 'driver' });
     if (t.riderSocketId) {
       io.to(t.riderSocketId).emit('trip:completed', { threadId, price: t.finalPrice, role: 'rider', driverName: t.driverName });
@@ -909,6 +1123,17 @@ async function resolveFixedPrice(pricingModel, driverRecord, request) {
       await riders.applyCancellationPenalty(t.riderPhone);
       penalized = true;
     }
+
+    const r = requests.get(t.requestId);
+    await trips.recordTrip({
+      requestId: t.requestId, threadId, riderPhone: t.riderPhone, riderName: r?.riderName,
+      driverId: t.driverId, driverName: t.driverName,
+      serviceCategory: t.serviceCategory || 'ride', vehicleType: t.vehicleType, country: r?.country || config.DEFAULT_COUNTRY,
+      currency: config.getCountry(r?.country || config.DEFAULT_COUNTRY).currency,
+      pickupName: r?.pickupName, dropName: r?.dropName, pickup: r?.pickup, drop: r?.drop, km: r?.km,
+      finalPrice: t.finalPrice, status: 'cancelled', cancelledBy: 'rider', penalized, createdAt: r?.createdAt
+    });
+
     io.to(t.driverSocketId).emit('trip:cancelledByRider', { threadId, penalized });
     socket.emit('trip:cancelConfirmed', { threadId, penalized });
   });
@@ -923,6 +1148,7 @@ async function resolveFixedPrice(pricingModel, driverRecord, request) {
       return ack && ack({ error: 'Invalid rating' });
     }
     const summary = await ratings.addRating(t.driverId, t.riderPhone, n);
+    await trips.attachRatingToTrip(threadId, n);
     const driverSocketId = driverSocketsByDriverId.get(t.driverId);
     if (driverSocketId) io.to(driverSocketId).emit('rating:received', { stars: n, summary });
     ack && ack({ ok: true, summary });

@@ -50,6 +50,13 @@
   .category-card .cat-icon{font-size:28px;display:block;margin-bottom:8px;}
   .category-card .cat-label{font-weight:700;font-size:13.5px;}
   .btn-back-cat{background:none;border:none;color:var(--ink-soft);font-size:13px;font-weight:600;padding:0 0 10px;cursor:pointer;font-family:inherit;}
+  .listing-card{display:flex;gap:12px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:10px;margin-bottom:10px;background:#fff;cursor:pointer;}
+  .listing-card:hover{border-color:var(--amber);}
+  .listing-photo{width:56px;height:56px;border-radius:10px;object-fit:cover;background:var(--paper-dim);flex-shrink:0;}
+  .listing-info{flex:1;min-width:0;}
+  .listing-name{font-weight:700;font-size:14.5px;}
+  .listing-shop{font-size:12.5px;color:var(--ink-soft);}
+  .listing-price{font-weight:700;color:var(--amber-deep);white-space:nowrap;}
   .vtype-btn{flex:1;border:1.5px solid var(--line);background:#fff;border-radius:12px;padding:10px;font-size:13.5px;font-weight:700;color:var(--ink-soft);cursor:pointer;font-family:inherit;}
   .vtype-btn.active{border-color:var(--asphalt);background:var(--asphalt);color:var(--paper);}
   .fare-input-wrap{flex:1;display:flex;align-items:center;gap:6px;border:1.5px solid var(--asphalt);border-radius:12px;padding:10px 14px;background:#fff;}
@@ -145,11 +152,21 @@
       <div class="category-grid" id="categoryGrid"></div>
     </div>
 
+    <div id="stepMarketBrowse" class="hidden">
+      <button class="btn-back-cat" id="btnBackToCategoriesFromMarket">← Change what you need</button>
+      <h2>Shops near you</h2>
+      <p class="sub" id="marketLocationHint">Tap the map to set your delivery location, then choose an item below.</p>
+      <div id="marketListingsGrid"></div>
+    </div>
+
     <div id="stepPlan" class="hidden">
       <button class="btn-back-cat" id="btnBackToCategories">← Change what you need</button>
       <h2 id="stepPlanTitle">Where to?</h2>
       <p class="sub" id="stepPlanSub">Tap the map to drop pins, or search below.</p>
       <div class="vehicle-toggle" id="subtypeToggle"></div>
+      <div id="carTypeWrap" class="hidden field-stack" style="margin-bottom:10px;">
+        <div class="field"><select id="carTypeSelect" style="border:none;outline:none;font-size:14.5px;flex:1;font-family:inherit;background:transparent;width:100%;padding:2px 0;"></select></div>
+      </div>
       <div class="field-stack">
         <div class="field">
           <span class="dot pickup"></span>
@@ -374,7 +391,16 @@
           <div class="wallet-label">Wallet balance</div>
           <div class="wallet-amount" id="walletAmount">UGX 0</div>
         </div>
-        <button class="btn" id="btnOpenTopup" style="margin-top:0;width:auto;padding:9px 16px;background:var(--amber);color:var(--asphalt);">Top up</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn" id="btnOpenTopup" style="margin-top:0;width:auto;padding:9px 16px;background:var(--amber);color:var(--asphalt);">Top up</button>
+          <button class="btn btn-outline" id="btnOpenWithdraw" style="margin-top:0;width:auto;padding:9px 16px;">Withdraw</button>
+        </div>
+      </div>
+      <div class="topup-form hidden" id="withdrawForm">
+        <div class="field-stack" style="margin-bottom:10px;">
+          <div class="field"><input id="withdrawAmount" type="number" inputmode="numeric" placeholder="Amount to withdraw"></div>
+        </div>
+        <button class="btn btn-primary" id="btnConfirmWithdraw">Withdraw to my mobile money</button>
       </div>
       <div class="wallet-banner hidden" id="walletLowBanner">Top up your wallet to start receiving ride requests — a minimum balance of <span id="walletMinAmount">UGX 5,000</span> is required.</div>
 
@@ -414,8 +440,43 @@
 
       <div id="activeTripCard" class="hidden"></div>
 
-      <h2 style="margin-top:18px;">Ride requests nearby</h2>
-      <p class="sub">Riders' proposed fares appear here live.</p>
+      <div id="shopManageSection" class="hidden">
+        <h2 style="margin-top:18px;">My shop listings</h2>
+        <p class="sub">Add what you're selling — customers browse these and order directly.</p>
+        <div id="shopListingsList"></div>
+        <div id="shopAddForm">
+          <div class="field-stack" style="margin-bottom:10px;">
+            <div class="field"><input id="shopItemName" placeholder="What are you selling? (e.g. Rice, Fabric)"></div>
+          </div>
+          <div class="field-stack" style="margin-bottom:10px;">
+            <div class="field"><input id="shopItemPrice" type="number" inputmode="numeric" placeholder="Price"></div>
+          </div>
+          <div class="vehicle-toggle" id="shopUnitToggle"></div>
+          <div id="shopUnitCustomWrap" class="hidden field-stack" style="margin-bottom:10px;">
+            <div class="field"><input id="shopUnitCustomText" placeholder="Describe the unit (e.g. per bundle, per sack)"></div>
+          </div>
+          <div class="field-stack" style="margin-bottom:10px;">
+            <label class="doctype-box" style="display:block;text-align:center;cursor:pointer;">
+              <input type="file" id="shopItemPhoto" accept="image/*" capture="environment" class="hidden">
+              <span id="shopPhotoLabel">📷 Add a photo</span>
+            </label>
+          </div>
+          <button class="btn btn-primary" id="btnAddListing">Add listing</button>
+        </div>
+      </div>
+
+      <div id="rateUpdateSection" class="hidden" style="margin-bottom:14px;">
+        <p class="sub" style="margin-bottom:6px;">Your current rate — customers see this before booking you.</p>
+        <div class="field-stack" style="margin-bottom:8px;">
+          <div class="field"><input id="newFixedRateInput" type="number" inputmode="numeric" placeholder="New rate"></div>
+        </div>
+        <button class="btn btn-outline" id="btnUpdateRate" style="margin-top:0;">Update my rate</button>
+      </div>
+
+      <div id="driverReqSectionTitle">
+        <h2 style="margin-top:18px;">Ride requests nearby</h2>
+        <p class="sub">Riders' proposed fares appear here live.</p>
+      </div>
       <div id="driverReqList"></div>
       <div class="empty-note" id="driverEmpty">No requests right now — new offers appear here the moment a rider posts one, from any device.</div>
     </div>
@@ -566,7 +627,7 @@ function initMap(){
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19, attribution:'&copy; OpenStreetMap contributors' }).addTo(map);
   map.on('click', (e)=>{
     if (role !== 'rider') return;
-    const isTwoLocation = selectedCategory === 'ride' || selectedCategory === 'delivery';
+    const isTwoLocation = ['ride','delivery','cargo'].includes(selectedCategory);
     if (!isTwoLocation){ setPickup([e.latlng.lat, e.latlng.lng], "Dropped pin"); return; }
     if (!pickup) setPickup([e.latlng.lat, e.latlng.lng], "Dropped pin");
     else if (!drop) setDrop([e.latlng.lat, e.latlng.lng], "Dropped pin");
@@ -583,6 +644,7 @@ function resetPinsOnly(){
 function pinIcon(cls, label){ return L.divIcon({className:'', html:`<div class="pin-label ${cls}">${label}</div>`, iconAnchor:[20,10]}); }
 async function setPickup(latlng, name){
   pickup={latlng,name}; if(pickupMarker) map.removeLayer(pickupMarker); pickupMarker=L.marker(latlng,{icon:pinIcon('pickup','Pickup')}).addTo(map); document.getElementById('pickupInput').value=name; map.panTo(latlng); recalcFare();
+  if (selectedCategory === 'market'){ document.getElementById('marketLocationHint').textContent = `Delivering to: ${name}`; }
 
   // The pickup point — not the rider's own device location — is what
   // should decide currency/rates/matching: someone in Malawi can still be
@@ -602,7 +664,7 @@ function setDrop(latlng, name){ drop={latlng,name}; if(dropMarker) map.removeLay
 let selectedVehicleType = 'motorcycle';
 function recalcFare(){
   const note=document.getElementById('suggestedFareNote'), btn=document.getElementById('btnRequest');
-  const isTwoLocation = selectedCategory === 'ride' || selectedCategory === 'delivery';
+  const isTwoLocation = ['ride','delivery','cargo'].includes(selectedCategory);
   const isRecycling = selectedCategory === 'waste' && selectedVehicleType === 'recycling';
   const sub = selectedCategoryDef?.subTypes.find(s=>s.value===selectedVehicleType);
   const pricingModel = sub?.pricingModel || 'negotiate';
@@ -674,7 +736,7 @@ function wireSearch(inputId, listId, onPick){
 }
 
 /* ---------------- Rider flow ---------------- */
-function showStep(id){ ['stepCategoryPicker','stepPlan','stepSearching','stepBids','stepTrip','stepDone'].forEach(s=>document.getElementById(s).classList.toggle('hidden', s!==id)); }
+function showStep(id){ ['stepCategoryPicker','stepMarketBrowse','stepPlan','stepSearching','stepBids','stepTrip','stepDone'].forEach(s=>document.getElementById(s).classList.toggle('hidden', s!==id)); }
 
 function clearTripUI(resetMap=true){
   showStep('stepCategoryPicker');
@@ -686,7 +748,7 @@ function clearTripUI(resetMap=true){
 }
 
 /* ---------------- Category picker + dynamic request form ---------------- */
-const CATEGORY_ICONS = { ride: '🚗', delivery: '📦', household: '🔧', waste: '🗑', gig: '💼' };
+const CATEGORY_ICONS = { ride: '🚗', delivery: '📦', household: '🔧', waste: '🗑', gig: '💼', cargo: '🚛', market: '🏪' };
 let riderCategoriesList = [];
 let selectedCategory = 'ride';
 let selectedCategoryDef = null;
@@ -706,11 +768,54 @@ async function loadRiderCategories(){
   });
 }
 document.getElementById('btnBackToCategories').onclick = ()=> showStep('stepCategoryPicker');
+document.getElementById('btnBackToCategoriesFromMarket').onclick = ()=> showStep('stepCategoryPicker');
+
+async function loadMarketListings(){
+  const grid = document.getElementById('marketListingsGrid');
+  grid.innerHTML = '<p class="sub">Loading nearby shops…</p>';
+  try{
+    const res = await fetch(`/api/shop/browse?country=${myCountry}`);
+    const data = await res.json();
+    if (!data.listings.length){ grid.innerHTML = '<p class="sub">No shops have listed anything here yet.</p>'; return; }
+    grid.innerHTML = data.listings.map(l => `
+      <div class="listing-card" data-id="${l.id}">
+        ${l.photo ? `<img class="listing-photo" src="${l.photo}">` : `<div class="listing-photo"></div>`}
+        <div class="listing-info">
+          <div class="listing-name">${l.name}</div>
+          <div class="listing-shop">${l.shopName}</div>
+        </div>
+        <div class="listing-price">${l.currency} ${fmtUGX(l.price)}<br><span style="font-weight:400;font-size:11.5px;">per ${l.unit==='other'?l.unitCustomText:l.unit}</span></div>
+      </div>
+    `).join('');
+    grid.querySelectorAll('.listing-card').forEach(card=>{
+      const listing = data.listings.find(l=>l.id===card.dataset.id);
+      card.onclick = ()=> orderMarketListing(listing);
+    });
+  }catch(e){ grid.innerHTML = '<p class="sub">Could not load shops right now.</p>'; }
+}
+
+function orderMarketListing(listing){
+  if (!confirm(`Order ${listing.name} from ${listing.shopName} for ${listing.currency} ${fmtUGX(listing.price)}?`)) return;
+  if (!pickup){ toast('Set your delivery location on the map first, then try again'); return; }
+  showStep('stepSearching');
+  document.getElementById('searchPickupName').textContent = pickup.name;
+  document.getElementById('searchFareShown').textContent = `${listing.currency} ${fmtUGX(listing.price)}`;
+  socket.emit('ride:create', {
+    pickup: pickup.latlng, drop: pickup.latlng, pickupName: pickup.name, dropName: pickup.name,
+    serviceCategory: 'market', vehicleType: 'general_store', listingId: listing.id, km: 0
+  }, (res)=>{
+    if (res && res.error){ toast(res.error); showStep('stepMarketBrowse'); return; }
+    if (res && res.requestId) myRequestId = res.requestId;
+    // Market auto-matches immediately — ride:matched fires right after this, no bidding screen needed
+  });
+}
 
 function selectCategory(code){
   selectedCategory = code;
   selectedCategoryDef = riderCategoriesList.find(c=>c.code===code);
   if (!selectedCategoryDef) return;
+
+  if (code === 'market'){ loadMarketListings(); showStep('stepMarketBrowse'); return; }
 
   // Title/subtitle
   document.getElementById('stepPlanTitle').textContent =
@@ -729,20 +834,33 @@ function selectCategory(code){
       btn.classList.add('active');
       selectedVehicleType = btn.dataset.type;
       document.getElementById('fareInput').value = '';
+      updateCarTypeField();
       configureFareUIForSelection();
       recalcFare();
     };
   });
+  updateCarTypeField();
 
   // Single-location categories (household, gig, waste) reuse the pickup
   // point as both pickup and drop — there's no real "route" for a
   // plumber visit or a rubbish collection the way there is for a ride.
-  const isTwoLocation = code === 'ride' || code === 'delivery';
+  const isTwoLocation = ['ride','delivery','cargo'].includes(code);
   document.getElementById('dropFieldWrap').classList.toggle('hidden', !isTwoLocation);
   document.getElementById('pickupInput').placeholder = isTwoLocation ? 'Pickup location' : 'Your location';
 
   configureFareUIForSelection();
   showStep('stepPlan');
+}
+
+function updateCarTypeField(){
+  const sub = selectedCategoryDef?.subTypes.find(s=>s.value===selectedVehicleType);
+  const wrap = document.getElementById('carTypeWrap');
+  if (sub?.carTypeOptions){
+    wrap.classList.remove('hidden');
+    document.getElementById('carTypeSelect').innerHTML = sub.carTypeOptions.map(o=>`<option value="${o}">${o==='Any' ? 'Any type of car (optional)' : o}</option>`).join('');
+  } else {
+    wrap.classList.add('hidden');
+  }
 }
 
 // Configures the fare row, weight input, and button label based on the
@@ -776,7 +894,7 @@ function configureFareUIForSelection(){
 
 
 document.getElementById('btnRequest').onclick = ()=>{
-  const isTwoLocation = selectedCategory === 'ride' || selectedCategory === 'delivery';
+  const isTwoLocation = ['ride','delivery','cargo'].includes(selectedCategory);
   const isRecycling = selectedCategory === 'waste' && selectedVehicleType === 'recycling';
   const sub = selectedCategoryDef?.subTypes.find(s=>s.value===selectedVehicleType);
   const pricingModel = sub?.pricingModel || 'negotiate';
@@ -797,9 +915,11 @@ document.getElementById('btnRequest').onclick = ()=>{
   document.getElementById('searchFareShown').textContent = pricingModel === 'fixed_by_provider'
     ? "Waiting for a provider's rate…" : `${currentCurrency} ${fmtUGX(currentFare)}`;
   showStep('stepSearching');
+  const carTypeNote = !document.getElementById('carTypeWrap').classList.contains('hidden')
+    ? document.getElementById('carTypeSelect').value : undefined;
   socket.emit('ride:create', {
     pickup: pickup.latlng, drop: dropPoint.latlng, pickupName: pickup.name, dropName: dropPoint.name,
-    proposedFare: currentFare, vehicleType: selectedVehicleType, serviceCategory: selectedCategory, km
+    proposedFare: currentFare, vehicleType: selectedVehicleType, serviceCategory: selectedCategory, km, carTypeNote
   }, (res)=>{
     if (res && res.requestId) myRequestId = res.requestId;
   });
@@ -1217,6 +1337,114 @@ socket.on('ride:list', (list)=>{ driverRequests={}; list.forEach(r=>driverReques
 socket.on('ride:available', (r)=>{ if (role==='driver'){ driverRequests[r.id]=r; renderDriverRequests(); } });
 socket.on('ride:removed', ({requestId})=>{ delete driverRequests[requestId]; delete driverThreadByRequest[requestId]; renderDriverRequests(); });
 
+/* ---------------- Shop (Market) management ---------------- */
+const UNIT_LABELS = { kg: 'Kg', meter: 'Meters', piece: 'Piece', liter: 'Liters', dozen: 'Dozen', other: 'Other' };
+let shopPhotoData = null;
+
+function buildShopUnitToggle(selected){
+  const toggle = document.getElementById('shopUnitToggle');
+  toggle.innerHTML = Object.entries(UNIT_LABELS).map(([value,label]) =>
+    `<button class="vtype-btn${value===selected?' active':''}" data-unit="${value}">${label}</button>`
+  ).join('');
+  toggle.querySelectorAll('.vtype-btn').forEach(btn=>{
+    btn.onclick = ()=>{
+      toggle.querySelectorAll('.vtype-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('shopUnitCustomWrap').classList.toggle('hidden', btn.dataset.unit !== 'other');
+    };
+  });
+}
+buildShopUnitToggle('kg');
+
+// As the seller types the item name, suggest a likely unit — they can
+// always override it, or pick "Other" and describe it freely.
+let unitSuggestTimer = null;
+document.getElementById('shopItemName').addEventListener('input', (e)=>{
+  clearTimeout(unitSuggestTimer);
+  const name = e.target.value.trim();
+  if (!name) return;
+  unitSuggestTimer = setTimeout(async ()=>{
+    try{
+      const res = await fetch(`/api/shop/suggest-unit?name=${encodeURIComponent(name)}`);
+      const data = await res.json();
+      if (data.unit) buildShopUnitToggle(data.unit);
+    }catch(e){}
+  }, 500);
+});
+
+document.getElementById('shopItemPhoto').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if (!file) return;
+  shopPhotoData = await fileToBase64(file);
+  document.getElementById('shopPhotoLabel').textContent = '📷 Photo added ✓';
+});
+
+document.getElementById('btnAddListing').onclick = async ()=>{
+  const name = document.getElementById('shopItemName').value.trim();
+  const price = parseInt(document.getElementById('shopItemPrice').value, 10);
+  const unit = document.getElementById('shopUnitToggle').querySelector('.vtype-btn.active')?.dataset.unit || 'kg';
+  const unitCustomText = document.getElementById('shopUnitCustomText').value.trim();
+  if (!name){ toast('Enter what you\'re selling'); return; }
+  if (!price || price <= 0){ toast('Enter a valid price'); return; }
+  if (unit === 'other' && !unitCustomText){ toast('Describe the unit'); return; }
+  const btn = document.getElementById('btnAddListing');
+  btn.disabled = true; btn.textContent = 'Adding…';
+  try{
+    const res = await fetch('/api/driver/shop/listings', {
+      method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${driverToken}`},
+      body: JSON.stringify({ name, price, unit, unitCustomText, photo: shopPhotoData })
+    });
+    const data = await res.json();
+    if (!res.ok){ toast(data.error || 'Could not add listing'); return; }
+    toast('Listing added');
+    document.getElementById('shopItemName').value = '';
+    document.getElementById('shopItemPrice').value = '';
+    document.getElementById('shopUnitCustomText').value = '';
+    document.getElementById('shopPhotoLabel').textContent = '📷 Add a photo';
+    document.getElementById('shopItemPhoto').value = '';
+    shopPhotoData = null;
+    buildShopUnitToggle('kg');
+    loadMyShopListings();
+  }catch(e){ toast('Something went wrong — try again'); }
+  finally{ btn.disabled = false; btn.textContent = 'Add listing'; }
+};
+
+async function loadMyShopListings(){
+  const list = document.getElementById('shopListingsList');
+  try{
+    const res = await fetch('/api/driver/shop/listings', { headers:{ Authorization:`Bearer ${driverToken}` } });
+    const data = await res.json();
+    if (!data.listings.length){ list.innerHTML = '<p class="sub">No listings yet — add your first item below.</p>'; return; }
+    list.innerHTML = data.listings.map(l => `
+      <div class="listing-card" style="cursor:default;${l.active?'':'opacity:0.5;'}">
+        ${l.photo ? `<img class="listing-photo" src="${l.photo}">` : `<div class="listing-photo"></div>`}
+        <div class="listing-info">
+          <div class="listing-name">${l.name}${l.active?'':' (hidden)'}</div>
+          <div class="listing-shop">${l.currency} ${fmtUGX(l.price)} per ${l.unit==='other'?l.unitCustomText:l.unit}</div>
+        </div>
+        <button class="btn btn-outline" style="margin-top:0;width:auto;padding:6px 10px;font-size:12px;" data-toggle="${l.id}" data-active="${l.active}">${l.active?'Hide':'Show'}</button>
+        <button class="btn btn-danger" style="margin-top:0;width:auto;padding:6px 10px;font-size:12px;" data-delete="${l.id}">Delete</button>
+      </div>
+    `).join('');
+    list.querySelectorAll('[data-toggle]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        await fetch(`/api/driver/shop/listings/${btn.dataset.toggle}`, {
+          method:'PATCH', headers:{'Content-Type':'application/json', Authorization:`Bearer ${driverToken}`},
+          body: JSON.stringify({ active: btn.dataset.active !== 'true' })
+        });
+        loadMyShopListings();
+      };
+    });
+    list.querySelectorAll('[data-delete]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        if (!confirm('Delete this listing?')) return;
+        await fetch(`/api/driver/shop/listings/${btn.dataset.delete}`, { method:'DELETE', headers:{ Authorization:`Bearer ${driverToken}` } });
+        loadMyShopListings();
+      };
+    });
+  }catch(e){ list.innerHTML = '<p class="sub">Could not load your listings.</p>'; }
+}
+
 function renderDriverRequests(){
   const list = document.getElementById('driverReqList');
   const empty = document.getElementById('driverEmpty');
@@ -1232,7 +1460,7 @@ function renderDriverRequests(){
         <div class="req-route">${r.pickupName} <span class="to">→ ${r.dropName}</span></div>
         <div class="req-price">${currentCurrency} ${fmtUGX(r.proposedFare)}</div>
       </div>
-      <div class="req-dist">${r.km.toFixed(1)} km · ${r.riderName}'s proposed fare</div>
+      <div class="req-dist">${r.km.toFixed(1)} km · ${r.riderName}'s proposed fare${r.carTypeNote ? ` · prefers ${r.carTypeNote}` : ''}</div>
       <div class="req-actions">
         <button class="btn btn-primary" id="acc-${r.id}">Accept fare</button>
         <button class="btn btn-outline" id="cnt-${r.id}">Counter-offer</button>
@@ -1340,7 +1568,14 @@ function updateDriverUI(status, reviewNote, wallet){
   if (status === 'approved'){
     showDriverState('driverDashboard');
     if (wallet) renderWallet(wallet);
-    renderDriverRequests();
+    const isShop = myDriverCategory === 'market';
+    document.getElementById('shopManageSection').classList.toggle('hidden', !isShop);
+    document.getElementById('driverReqSectionTitle').classList.toggle('hidden', isShop);
+    document.getElementById('driverReqList').classList.toggle('hidden', isShop);
+    const myCategoryDef = riderCategoriesList.find(c=>c.code===myDriverCategory);
+    const usesFixedRate = myCategoryDef?.subTypes.some(s=>s.pricingModel==='fixed_by_provider');
+    document.getElementById('rateUpdateSection').classList.toggle('hidden', !usesFixedRate);
+    if (isShop) loadMyShopListings(); else renderDriverRequests();
   } else if (status === 'pending'){
     showDriverState('driverPending');
   } else if (status === 'rejected'){
@@ -1348,6 +1583,23 @@ function updateDriverUI(status, reviewNote, wallet){
     showDriverState('driverRejected');
   }
 }
+document.getElementById('btnUpdateRate').onclick = async ()=>{
+  const fixedRate = parseInt(document.getElementById('newFixedRateInput').value, 10);
+  if (!fixedRate || fixedRate <= 0){ toast('Enter a valid rate'); return; }
+  const btn = document.getElementById('btnUpdateRate');
+  btn.disabled = true; btn.textContent = 'Updating…';
+  try{
+    const res = await fetch('/api/driver/profile/rate', {
+      method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${driverToken}`},
+      body: JSON.stringify({ fixedRate })
+    });
+    const data = await res.json();
+    if (!res.ok){ toast(data.error || 'Could not update rate'); return; }
+    toast(`Rate updated to ${currentCurrency} ${fmtUGX(fixedRate)}`);
+    document.getElementById('newFixedRateInput').value = '';
+  }catch(e){ toast('Something went wrong — try again'); }
+  finally{ btn.disabled = false; btn.textContent = 'Update my rate'; }
+};
 
 let currentCommissionRate = 0.07;
 // The one place currentCurrency actually changes, and everything on
@@ -1389,6 +1641,7 @@ function renderWallet(wallet){
 socket.on('driver:status', (info)=>{
   if (role !== 'driver') return;
   if (info.status === 'unauthenticated'){ driverLogout(); return; }
+  myDriverCategory = info.serviceCategory || myDriverCategory;
   updateDriverUI(info.status, info.reviewNote, info.wallet);
   if (info.status === 'approved' && lastKnownDriverStatus !== 'approved') toast('Your driver account was approved!');
   if (info.status === 'rejected') toast('Your application was not approved.');
@@ -1396,6 +1649,7 @@ socket.on('driver:status', (info)=>{
 });
 socket.on('wallet:update', (wallet)=>{ renderWallet(wallet); });
 let lastKnownDriverStatus = null;
+let myDriverCategory = null;
 
 function driverLogout(){
   driverToken = '';
@@ -1409,6 +1663,28 @@ document.getElementById('btnCheckStatus').onclick = resolveDriverState;
 
 document.getElementById('btnOpenTopup').onclick = ()=>{
   document.getElementById('topupForm').classList.toggle('hidden');
+};
+document.getElementById('btnOpenWithdraw').onclick = ()=>{
+  document.getElementById('withdrawForm').classList.toggle('hidden');
+};
+document.getElementById('btnConfirmWithdraw').onclick = async ()=>{
+  const amount = parseInt(document.getElementById('withdrawAmount').value, 10);
+  if (!amount || amount <= 0){ toast('Enter an amount'); return; }
+  const btn = document.getElementById('btnConfirmWithdraw');
+  btn.disabled = true; btn.textContent = 'Processing…';
+  try{
+    const res = await fetch('/api/driver/wallet/withdraw', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${driverToken}` },
+      body: JSON.stringify({ amount })
+    });
+    const data = await res.json();
+    if (!res.ok){ toast(data.error || 'Withdrawal failed'); if (data.wallet) renderWallet(data.wallet); return; }
+    toast(`${currentCurrency} ${fmtUGX(amount)} sent to your mobile money`);
+    document.getElementById('withdrawAmount').value = '';
+    document.getElementById('withdrawForm').classList.add('hidden');
+    renderWallet(data.wallet);
+  }catch(e){ toast('Something went wrong — try again'); }
+  finally{ btn.disabled = false; btn.textContent = 'Withdraw to my mobile money'; }
 };
 let topupNumbersLoaded = false;
 document.getElementById('btnShowManualTopup').onclick = async ()=>{

@@ -21,7 +21,11 @@ const COUNTRIES = {
     documentLabels: { national_id: 'National ID', driving_license: 'Driving Permit / Licence' },
     rates: {
       motorcycle: { base: 1000, perKm: 700 },
-      car: { base: 2000, perKm: 1300 }
+      car: { base: 2000, perKm: 1300 },
+      // Cargo rates — placeholder, scaled from the car rate (1.5x/2.5x/4x). Not researched against real Uganda truck-hire pricing; confirm before this category goes live for real money.
+      pickup_truck: { base: 3000, perKm: 1950 },
+      small_truck: { base: 5000, perKm: 3250 },
+      large_truck: { base: 8000, perKm: 5200 }
     },
     // Placeholder — not researched against real Uganda waste-management
     // pricing the way ride rates were. Confirm real numbers (e.g. against
@@ -50,7 +54,10 @@ const COUNTRIES = {
     // Uganda's well-documented boda-boda pricing to solve against directly.
     rates: {
       motorcycle: { base: 13, perKm: 5 }, // motorcycle-taxi culture isn't well documented in Zambia the way it is in Uganda — confirm riders/drivers actually want this option before real launch
-      car: { base: 22, perKm: 9 }
+      car: { base: 22, perKm: 9 },
+      pickup_truck: { base: 33, perKm: 14 }, // cargo rates — placeholder, scaled from the car rate, not independently researched
+      small_truck: { base: 55, perKm: 23 },
+      large_truck: { base: 88, perKm: 36 }
     },
     wasteRates: { collectionFee: 40, recyclingPerKg: 2 } // placeholder — not researched against real Zambia waste-management pricing
   },
@@ -78,7 +85,10 @@ const COUNTRIES = {
     // a premium/airport-transfer tier rather than everyday local pricing.
     rates: {
       motorcycle: { base: 250, perKm: 60 },
-      car: { base: 400, perKm: 100 }
+      car: { base: 400, perKm: 100 },
+      pickup_truck: { base: 600, perKm: 150 }, // cargo rates — placeholder, scaled from the car rate, not independently researched
+      small_truck: { base: 1000, perKm: 250 },
+      large_truck: { base: 1600, perKm: 400 }
     },
     wasteRates: { collectionFee: 800, recyclingPerKg: 30 } // placeholder — not researched against real Malawi waste-management pricing
   },
@@ -92,7 +102,10 @@ const COUNTRIES = {
     mapCenter: [-24.6282, 25.9231], // Gaborone
     rates: {
       motorcycle: { base: 15, perKm: 8 }, // placeholder — motorcycle-taxi culture is far less common in Botswana than Uganda; verify this vehicle type is even wanted here before launch
-      car: { base: 25, perKm: 15 }
+      car: { base: 25, perKm: 15 },
+      pickup_truck: { base: 38, perKm: 23 }, // cargo rates — placeholder, scaled from the car rate, not independently researched
+      small_truck: { base: 63, perKm: 38 },
+      large_truck: { base: 100, perKm: 60 }
     },
     wasteRates: { collectionFee: 40, recyclingPerKg: 2 } // placeholder — not researched against real Botswana waste-management pricing
   },
@@ -112,7 +125,10 @@ const COUNTRIES = {
     mapCenter: [-17.8292, 31.0522], // Harare
     rates: {
       motorcycle: { base: 0.5, perKm: 0.3 },
-      car: { base: 1, perKm: 0.6 }
+      car: { base: 1, perKm: 0.6 },
+      pickup_truck: { base: 1.5, perKm: 0.9 }, // cargo rates — placeholder, scaled from the car rate, not independently researched
+      small_truck: { base: 2.5, perKm: 1.5 },
+      large_truck: { base: 4, perKm: 2.4 }
     },
     wasteRates: { collectionFee: 3, recyclingPerKg: 0.15 } // placeholder — not researched against real Zimbabwe waste-management pricing
   }

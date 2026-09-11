@@ -41,8 +41,10 @@ async function initSchema() {
       vehicle_plate    TEXT, -- null for non-vehicle categories (household services, most gig work)
       vehicle_model    TEXT,
       vehicle_color    TEXT,
-      document_photo_path TEXT,
-      selfie_path      TEXT,
+      document_photo_path TEXT, -- legacy local-disk path, kept for old records; new uploads use document_photo_data below
+      selfie_path      TEXT,    -- legacy local-disk path, same reasoning
+      document_photo_data TEXT, -- base64 photo data, stored directly in the database so it survives a Render redeploy (the local disk does not)
+      selfie_data      TEXT,
       status           TEXT NOT NULL DEFAULT 'pending',
       review_note      TEXT NOT NULL DEFAULT '',
       submitted_at     BIGINT NOT NULL,
@@ -58,6 +60,8 @@ async function initSchema() {
     ALTER TABLE drivers ADD COLUMN IF NOT EXISTS trust_referee_phone TEXT;
     ALTER TABLE drivers ADD COLUMN IF NOT EXISTS trust_referee_type TEXT; -- 'lc1' | 'personal'
     ALTER TABLE drivers ADD COLUMN IF NOT EXISTS fixed_rate BIGINT; -- provider's own set rate, for categories priced 'fixed_by_provider' (e.g. household services) — null for negotiated categories
+    ALTER TABLE drivers ADD COLUMN IF NOT EXISTS document_photo_data TEXT;
+    ALTER TABLE drivers ADD COLUMN IF NOT EXISTS selfie_data TEXT;
 
     CREATE TABLE IF NOT EXISTS ledger_entries (
       id                   TEXT PRIMARY KEY,
@@ -111,6 +115,26 @@ async function initSchema() {
     -- deliveries. Each row is one category+sub-type combination they're
     -- registered for; approving the driver approves every offering they
     -- listed at once, since it's the same underlying identity check.
+    -- Each row is one item a Shop (Market) provider is selling — a
+    -- photo, a name, a price, and a unit (kg, metre, piece, litre,
+    -- dozen, or free-text "other" for anything that doesn't fit those).
+    -- Unlike every other category, Market's pricing lives on the
+    -- LISTING itself, not on the provider as a single flat rate — a
+    -- shop sells many different things at many different prices.
+    CREATE TABLE IF NOT EXISTS shop_listings (
+      id            TEXT PRIMARY KEY,
+      driver_id     TEXT NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+      name          TEXT NOT NULL,
+      photo_data    TEXT,
+      price         BIGINT NOT NULL,
+      unit          TEXT NOT NULL,  -- 'kg' | 'meter' | 'piece' | 'liter' | 'dozen' | 'other'
+      unit_custom_text TEXT,        -- only used when unit = 'other'
+      currency      TEXT NOT NULL,
+      active        BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at    BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_shop_listings_driver ON shop_listings(driver_id);
+
     CREATE TABLE IF NOT EXISTS driver_offerings (
       id           TEXT PRIMARY KEY,
       driver_id    TEXT NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
@@ -119,6 +143,60 @@ async function initSchema() {
       fixed_rate   BIGINT, -- only meaningful for 'fixed_by_provider' categories (household services)
       created_at   BIGINT NOT NULL,
       UNIQUE(driver_id, category, sub_type)
+    );
+
+    -- Live negotiation (open requests, back-and-forth offers) stays in
+    -- server memory deliberately — it's short-lived and needs to be
+    -- fast, and losing an in-progress negotiation on a restart is a
+    -- minor inconvenience (just try again). But the FINAL outcome of
+    -- every trip — completed, cancelled, or declined — is recorded here
+    -- permanently, so it survives restarts/redeploys and can actually
+    -- be looked up later for a dispute, a driver disagreement, or your
+    -- own accounting. This table did not exist before, which meant NO
+    -- trip in this app's whole history could ever be looked back on.
+    CREATE TABLE IF NOT EXISTS trips (
+      id                TEXT PRIMARY KEY,
+      request_id        TEXT NOT NULL,
+      thread_id         TEXT,
+      rider_phone       TEXT,
+      rider_name        TEXT,
+      driver_id         TEXT REFERENCES drivers(id) ON DELETE SET NULL,
+      driver_name       TEXT,
+      service_category  TEXT NOT NULL,
+      vehicle_type      TEXT,
+      country           TEXT NOT NULL,
+      currency          TEXT,
+      pickup_name       TEXT,
+      drop_name         TEXT,
+      pickup_lat        DOUBLE PRECISION,
+      pickup_lng        DOUBLE PRECISION,
+      drop_lat          DOUBLE PRECISION,
+      drop_lng          DOUBLE PRECISION,
+      km                DOUBLE PRECISION,
+      final_price       BIGINT,
+      commission_amount BIGINT,
+      commission_rate   NUMERIC,
+      payment_method    TEXT,        -- 'cash' | 'card'
+      status            TEXT NOT NULL, -- 'completed' | 'cancelled' | 'declined'
+      cancelled_by      TEXT,        -- 'rider' | 'driver' | null
+      penalized         BOOLEAN NOT NULL DEFAULT FALSE,
+      rating_stars      INT,
+      created_at        BIGINT NOT NULL,
+      ended_at          BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_trips_driver ON trips(driver_id);
+    CREATE INDEX IF NOT EXISTS idx_trips_rider ON trips(rider_phone);
+    CREATE INDEX IF NOT EXISTS idx_trips_ended ON trips(ended_at);
+
+    -- Generic admin-editable overrides — lets fare rates and commission
+    -- rates be changed from the admin panel at runtime, instead of
+    -- needing a code change and a redeploy for every price adjustment.
+    -- Checked first; falls back to the hardcoded defaults in
+    -- config.js/categories.js when no override exists for a given key.
+    CREATE TABLE IF NOT EXISTS settings (
+      key         TEXT PRIMARY KEY,
+      value       JSONB NOT NULL,
+      updated_at  BIGINT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS support_reports (

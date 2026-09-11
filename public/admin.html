@@ -44,6 +44,12 @@
   .section-tabs button.active{color:var(--ink);border-bottom-color:var(--asphalt);}
   .topup-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
   .topup-amount{font-weight:800;font-size:19px;font-variant-numeric:tabular-nums;}
+  .rate-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+  .rate-label{flex:1;min-width:160px;font-weight:600;font-size:14px;}
+  .override-dot{width:8px;height:8px;border-radius:50%;background:var(--rust);display:inline-block;margin-left:6px;}
+  .rate-row input{width:90px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:13px;}
+  .rate-row button{padding:6px 12px;border-radius:6px;border:1px solid var(--asphalt);background:var(--asphalt);color:#fff;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;}
+  .rate-row button.reset{background:#fff;color:var(--rust);border-color:var(--rust);}
   .topup-ref{font-size:12px;color:var(--ink-soft);margin-top:2px;}
 </style>
 </head>
@@ -61,6 +67,7 @@
       <button data-section="drivers" class="active">Driver applications</button>
       <button data-section="topups">Wallet top-ups</button>
       <button data-section="reports">Safety reports</button>
+      <button data-section="rates">Rates &amp; commission</button>
     </div>
 
     <div id="driversSection">
@@ -88,6 +95,20 @@
       <p class="sub">Complaints and safety concerns submitted directly from the app.</p>
       <div id="reportsList"></div>
       <div class="empty hidden" id="reportsEmpty">No open reports.</div>
+    </div>
+
+    <div id="ratesSection" class="hidden">
+      <h1>Rates &amp; commission</h1>
+      <p class="sub">Change a price here and it applies immediately — no code change or redeploy needed. A pink dot means this number has been changed from the built-in default.</p>
+
+      <h2 style="margin-top:22px;font-size:16px;">Fare rates (base + per-km) by country and vehicle</h2>
+      <div id="ratesTable"></div>
+
+      <h2 style="margin-top:26px;font-size:16px;">Waste collection &amp; recycling rates by country</h2>
+      <div id="wasteRatesTable"></div>
+
+      <h2 style="margin-top:26px;font-size:16px;">Commission rate by category</h2>
+      <div id="commissionTable"></div>
     </div>
   </div>
 </div>
@@ -209,10 +230,96 @@ document.querySelectorAll('.section-tabs button').forEach(b=>{
     document.getElementById('driversSection').classList.toggle('hidden', section!=='drivers');
     document.getElementById('topupsSection').classList.toggle('hidden', section!=='topups');
     document.getElementById('reportsSection').classList.toggle('hidden', section!=='reports');
+    document.getElementById('ratesSection').classList.toggle('hidden', section!=='rates');
     if (section === 'topups') loadTopups();
     if (section === 'reports') loadReports();
+    if (section === 'rates') loadRates();
   };
 });
+
+async function loadRates(){
+  const res = await fetch('/api/admin/settings/rates', { headers: { Authorization: `Bearer ${adminToken}` } });
+  const data = await res.json();
+
+  document.getElementById('ratesTable').innerHTML = data.rates.map(r => `
+    <div class="rate-row">
+      <div class="rate-label">${r.country} — ${r.vehicleType}${r.isOverridden ? '<span class="override-dot"></span>' : ''}</div>
+      base <input type="number" value="${r.base}" data-base>
+      per-km <input type="number" value="${r.perKm}" data-perkm>
+      <button data-save-rate="${r.country}|${r.vehicleType}">Save</button>
+      ${r.isOverridden ? `<button class="reset" data-reset-rate="${r.country}|${r.vehicleType}">Reset to default</button>` : ''}
+    </div>
+  `).join('');
+
+  document.getElementById('wasteRatesTable').innerHTML = data.wasteRates.map(r => `
+    <div class="rate-row">
+      <div class="rate-label">${r.country}${r.isOverridden ? '<span class="override-dot"></span>' : ''}</div>
+      collection fee <input type="number" value="${r.collectionFee}" data-fee>
+      per-kg (recycling) <input type="number" value="${r.recyclingPerKg}" data-perkg>
+      <button data-save-waste="${r.country}">Save</button>
+      ${r.isOverridden ? `<button class="reset" data-reset-waste="${r.country}">Reset to default</button>` : ''}
+    </div>
+  `).join('');
+
+  document.getElementById('commissionTable').innerHTML = data.commissions.map(c => `
+    <div class="rate-row">
+      <div class="rate-label">${c.category} — ${c.subType}${c.isOverridden ? '<span class="override-dot"></span>' : ''}</div>
+      rate (0–1) <input type="number" step="0.01" min="0" max="1" value="${c.rate}" data-rate>
+      <button data-save-commission="${c.category}|${c.subType}">Save</button>
+      ${c.isOverridden ? `<button class="reset" data-reset-commission="${c.category}|${c.subType}">Reset to default</button>` : ''}
+    </div>
+  `).join('');
+
+  document.querySelectorAll('[data-save-rate]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const [country, vehicleType] = btn.dataset.saveRate.split('|');
+      const row = btn.closest('.rate-row');
+      const base = Number(row.querySelector('[data-base]').value);
+      const perKm = Number(row.querySelector('[data-perkm]').value);
+      await fetch('/api/admin/settings/rate', { method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${adminToken}`}, body: JSON.stringify({ country, vehicleType, base, perKm }) });
+      loadRates();
+    };
+  });
+  document.querySelectorAll('[data-reset-rate]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const [country, vehicleType] = btn.dataset.resetRate.split('|');
+      await fetch(`/api/admin/settings/rate/${country}/${vehicleType}`, { method:'DELETE', headers:{ Authorization:`Bearer ${adminToken}` } });
+      loadRates();
+    };
+  });
+  document.querySelectorAll('[data-save-waste]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const country = btn.dataset.saveWaste;
+      const row = btn.closest('.rate-row');
+      const collectionFee = Number(row.querySelector('[data-fee]').value);
+      const recyclingPerKg = Number(row.querySelector('[data-perkg]').value);
+      await fetch('/api/admin/settings/waste-rate', { method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${adminToken}`}, body: JSON.stringify({ country, collectionFee, recyclingPerKg }) });
+      loadRates();
+    };
+  });
+  document.querySelectorAll('[data-reset-waste]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      await fetch(`/api/admin/settings/waste-rate/${btn.dataset.resetWaste}`, { method:'DELETE', headers:{ Authorization:`Bearer ${adminToken}` } });
+      loadRates();
+    };
+  });
+  document.querySelectorAll('[data-save-commission]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const [category, subType] = btn.dataset.saveCommission.split('|');
+      const row = btn.closest('.rate-row');
+      const rate = Number(row.querySelector('[data-rate]').value);
+      await fetch('/api/admin/settings/commission', { method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${adminToken}`}, body: JSON.stringify({ category, subType, rate }) });
+      loadRates();
+    };
+  });
+  document.querySelectorAll('[data-reset-commission]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const [category, subType] = btn.dataset.resetCommission.split('|');
+      await fetch(`/api/admin/settings/commission/${category}/${subType}`, { method:'DELETE', headers:{ Authorization:`Bearer ${adminToken}` } });
+      loadRates();
+    };
+  });
+}
 
 async function loadReports(){
   const res = await fetch('/api/admin/support-reports?status=open', { headers:{Authorization:`Bearer ${adminToken}`} });

@@ -40,6 +40,7 @@ const CATEGORIES = {
     minDepositMultiplier: 0.4,             // fraction of the country's ride deposit — couriers carry lower per-trip risk than a ride driver
     subTypes: [
       { value: 'motorcycle', label: '🏍 Motorcycle' },
+      { value: 'car', label: '🚗 Car', carTypeOptions: ['Any', 'Sedan', 'SUV / Pickup', 'Van'] }, // larger/heavier deliveries — car type is informational only, doesn't affect matching
       { value: 'bicycle', label: '🚲 Bicycle' },
       { value: 'on_foot', label: '🚶 On foot' }
     ]
@@ -85,6 +86,39 @@ const CATEGORIES = {
       { value: 'recycling', label: '♻️ Recyclables (get paid)', moneyDirection: 'provider_pays_requester', pricingModel: 'fixed_per_kg', commissionRate: 0.01 }
     ]
   },
+  cargo: {
+    label: 'Cargo',
+    negotiationLabel: 'cargo fee',
+    pricingModel: 'negotiate',             // same reasoning as delivery — price genuinely varies with distance and cargo size
+    commissionRate: null,                  // defers to the global COMMISSION_RATE env var
+    requiresVehicle: true,
+    requiresDeposit: true,
+    requiresTrustReferee: false,
+    moneyDirection: 'requester_pays_provider',
+    minDepositMultiplier: 1.5,             // bigger vehicles, higher-value loads — placeholder multiplier, not researched against real cargo-transport risk the way ride/delivery deposits were
+    subTypes: [
+      { value: 'pickup_truck', label: '🛻 Pickup truck' },
+      { value: 'small_truck', label: '🚚 Small truck' },
+      { value: 'large_truck', label: '🚛 Large truck / lorry' }
+    ]
+  },
+  market: {
+    label: 'Shop (Market)',
+    negotiationLabel: 'price',
+    // Fixed, per-LISTING pricing — closer to a marketplace than a
+    // negotiated service. Each shop sets its own prices per item, so
+    // this doesn't fit the single fixedRate-per-provider model that
+    // household services use; pricing lives on the listing itself.
+    pricingModel: 'per_listing',
+    commissionRate: null,                  // defers to the global COMMISSION_RATE env var
+    requiresVehicle: false,                // a shop's location is fixed, not a mobile service
+    requiresDeposit: false,
+    requiresTrustReferee: false,
+    moneyDirection: 'requester_pays_provider',
+    subTypes: [
+      { value: 'general_store', label: '🏪 General store / shop' }
+    ]
+  },
   gig: {
     label: 'Gig work',
     negotiationLabel: 'rate',
@@ -102,7 +136,7 @@ const CATEGORIES = {
   }
 };
 
-const ACTIVE_CATEGORIES = ['ride', 'delivery', 'household', 'waste', 'gig'];
+const ACTIVE_CATEGORIES = ['ride', 'delivery', 'household', 'waste', 'gig', 'cargo', 'market'];
 
 function isValidCategory(code) {
   return Object.prototype.hasOwnProperty.call(CATEGORIES, code);

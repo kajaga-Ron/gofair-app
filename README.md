@@ -1049,3 +1049,109 @@ other party. This isn't incidental; the server checks `thread.status
   proven correct, but the on-device experience (permission prompts,
   how smoothly a real phone's GPS updates the marker) needs a real
   phone to fully confirm
+
+## Delivery now includes Car, with an optional car-type note
+
+Delivery's vehicle options were motorcycle, bicycle, and on-foot only —
+missing car entirely, which matters for larger or heavier deliveries.
+**Fixed**: delivery now offers Motorcycle, Car, Bicycle, and On foot.
+
+When a rider picks Car for a delivery, an optional dropdown appears —
+Any / Sedan / SUV-Pickup / Van — so they can hint at the size needed
+for a bulkier delivery. This is deliberately informational only: it
+doesn't affect matching (any car-registered delivery driver still sees
+every car-delivery request regardless of what type was requested) — a
+driver just sees the rider's preference noted alongside the request
+("prefers Van") so they can judge for themselves whether their vehicle
+suits it.
+
+## Confirmed: suggested price already shows before negotiation starts
+
+Checked this directly rather than assuming — this was already built in
+the earlier rider-side rework. The moment both a pickup and drop-off
+point are set (for Ride/Delivery), `setDrop()` already triggers a live
+fare suggestion automatically, shown in the note under the fare box and
+pre-filling the input — all before the rider ever touches "Propose this
+fare." No changes were needed here; verified the existing behavior
+actually does what was asked.
+
+## Session summary: "fix them all" — wallet withdrawal, trip history, document storage, Cargo, and Shop (Market)
+
+### Wallet withdrawal — built, tested, and one real bug caught along the way
+A driver who tops up more than they need can now withdraw the excess
+back to their mobile money, reusing the same Flutterwave payout
+mechanism already built for card-fare payouts. **A real bug was caught
+mid-testing**: the insufficient-balance error path tried to build a
+wallet view from a driver record that wasn't included in that specific
+return path, causing an unrelated 500 error to mask the real "Insufficient
+wallet balance" message. Found it, fixed it, and re-verified the exact
+balance stayed untouched on a rejected withdrawal attempt.
+
+### Trip history now genuinely persists — proven, not just claimed
+Added a permanent `trips` table recording the final outcome (completed,
+cancelled) of every trip, including price, commission, payment method,
+and rating. **Proved this actually works** by killing the running
+server mid-test and starting a brand new process — the trips were
+still there afterward, exactly as recorded.
+
+### Document photos now survive a Render redeploy
+Switched from local disk (which Render wipes on every deploy) to
+storing photos directly in Postgres. Verified directly: registered a
+driver, confirmed no local `uploads/` folder was ever created, and
+confirmed the admin panel correctly retrieves and displays the stored
+photo.
+
+### Cargo — a new category for larger/heavier deliveries
+Pickup truck, small truck, and large truck/lorry, priced the same
+negotiate way as Delivery. Rates added for all 5 countries, scaled from
+each country's existing car rate — clearly flagged as an unresearched
+placeholder, the same honesty standard held throughout this project.
+Confirm real cargo-transport pricing before this goes live for real
+money.
+
+### Shop (Market) — a genuinely different kind of category, built and tested
+This isn't a service someone requests and waits to be matched with —
+it's a shop selling specific priced goods. Built from scratch:
+- **Sellers add listings** with a photo, a price, and a unit
+- **A keyword-based unit suggestion**, exactly as asked: typing "Rice"
+  suggests Kg, "Fabric" suggests Meters, "Eggs" suggests Dozen (checked
+  before the singular "egg" so it doesn't fall through to Piece) — and
+  it can always be overridden, including a fully custom "Other" unit
+  with free text
+- **Orders go directly to the specific shop that listed the item**, not
+  broadcast to a room of any nearby provider — and since the price is
+  already fixed by the listing, there's no negotiation phase at all;
+  ordering auto-matches immediately
+- **Tested a real price-manipulation attempt** — a customer trying to
+  submit an order at 1 unit of currency instead of the listing's real
+  5,000 — and confirmed the server ignored it completely, always using
+  the listing's actual stored price
+
+### Still ahead — not done in this pass
+Rate editing without a full re-approval cycle, admin-editable fare and
+commission rates (currently still require a code change and redeploy
+for every adjustment), push notifications, and the smaller items
+(language localization, blocking a specific driver, linking the
+privacy policy in the live app).
+
+## Admin-editable rates — the UI is now built, not just the API
+
+Finished the piece that was left mid-flight: a "Rates & commission" tab
+in `admin.html` where every fare rate, waste rate, and commission
+percentage can be viewed and changed by clicking, not just by calling
+the API directly.
+
+- Every editable number shows a small pink dot when it's been changed
+  from the built-in code default, so it's obvious at a glance what's
+  been customized
+- Each row has its own "Save" and, once overridden, a "Reset to
+  default" button that removes the override entirely and reverts to
+  the original code-defined value
+- **Tested by making the exact same API calls the page's buttons
+  trigger** — save a waste-rate override, confirm it shows as
+  overridden with the right numbers, reset it, confirm it reverts
+  cleanly to the original default
+
+No code change or redeploy is needed for a price adjustment anymore —
+this was the whole point of building the settings-override system in
+the first place, and now there's an actual page to use it from.

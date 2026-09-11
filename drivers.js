@@ -15,6 +15,8 @@ const jwt = require('jsonwebtoken');
 const { pool } = require('./db');
 const documents = require('./documents');
 const ratings = require('./ratings');
+const payments = require('./payments');
+const settings = require('./settings');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-secret-change-this';
 if (JWT_SECRET === 'dev-only-secret-change-this') {
@@ -185,9 +187,10 @@ async function registerOrResubmit({ phone, password, fullName, country, serviceC
   const passwordHash = bcrypt.hashSync(password, 10);
   const id = existing ? existing.id : nextId();
 
-  // Save photos to disk AFTER we know the driver id, so they land in that driver's folder
-  const documentPhotoPath = documents.saveDocument(id, 'document', documentPhoto);
-  const selfiePath = documents.saveDocument(id, 'selfie', selfie);
+  // Validate, then store directly in the database — Postgres survives a
+  // Render redeploy; the local disk this used to write to does not.
+  const documentPhotoData = documents.validateDocumentDataUrl(documentPhoto);
+  const selfieData = documents.validateDocumentDataUrl(selfie);
   const storedFixedRate = pricingModel === 'fixed_by_provider' ? fixedRate : null;
 
   if (existing) {
@@ -196,24 +199,24 @@ async function registerOrResubmit({ phone, password, fullName, country, serviceC
         password_hash = $1, full_name = $2, country = $3, service_category = $4, document_type = $5, document_number = $6,
         vehicle_type = $7, vehicle_plate = $8, vehicle_model = $9, vehicle_color = $10,
         trust_referee_name = $11, trust_referee_phone = $12, trust_referee_type = $13, fixed_rate = $14,
-        document_photo_path = $15, selfie_path = $16,
+        document_photo_data = $15, selfie_data = $16,
         status = 'pending', review_note = '', submitted_at = $17, reviewed_at = NULL
       WHERE id = $18
     `, [passwordHash, fullName, countryCode, categoryCode, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor,
         trustRefereeName || null, trustRefereePhone || null, trustRefereeType || null, storedFixedRate,
-        documentPhotoPath, selfiePath, Date.now(), id]);
+        documentPhotoData, selfieData, Date.now(), id]);
   } else {
     await pool.query(`
       INSERT INTO drivers (
         id, phone, password_hash, full_name, country, service_category, document_type, document_number,
         vehicle_type, vehicle_plate, vehicle_model, vehicle_color,
         trust_referee_name, trust_referee_phone, trust_referee_type, fixed_rate,
-        document_photo_path, selfie_path, status, review_note, submitted_at, wallet_balance
+        document_photo_data, selfie_data, status, review_note, submitted_at, wallet_balance
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pending','',$19,0)
     `, [id, phone, passwordHash, fullName, countryCode, categoryCode, documentType, documentNumber,
         vehicleType, vehiclePlate, vehicleModel, vehicleColor,
         trustRefereeName || null, trustRefereePhone || null, trustRefereeType || null, storedFixedRate,
-        documentPhotoPath, selfiePath, Date.now()]);
+        documentPhotoData, selfieData, Date.now()]);
   }
   for (const off of validOfferings) {
     await addOffering(id, off.category, off.subType, off.fixedRate || null);
@@ -267,13 +270,21 @@ async function setStatus(id, status, note) {
   return { driver: await findById(id) };
 }
 
-// Path lookup for the admin document-viewing route (server.js) — never
-// exposed to the client directly, only used server-side to stream bytes.
+// Document lookup for the admin document-viewing route (server.js) —
+// never exposed to the client directly, only used server-side.
+// Returns { data: base64DataUrl } for database-stored documents (the
+// normal case now), or { diskPath } for old records that predate this
+// change and only ever had a local-disk path.
 async function getDocumentDiskPath(driverId, field) {
-  const { rows } = await pool.query('SELECT document_photo_path, selfie_path FROM drivers WHERE id = $1', [driverId]);
+  const { rows } = await pool.query(
+    'SELECT document_photo_path, selfie_path, document_photo_data, selfie_data FROM drivers WHERE id = $1', [driverId]
+  );
   if (!rows[0]) return null;
+  const data = field === 'selfie' ? rows[0].selfie_data : rows[0].document_photo_data;
+  if (data) return { data };
   const relPath = field === 'selfie' ? rows[0].selfie_path : rows[0].document_photo_path;
-  return documents.getDocumentPath(relPath);
+  const diskPath = documents.getDocumentPath(relPath);
+  return diskPath ? { diskPath } : null;
 }
 
 // ---------------- Wallet: top-ups + commission ----------------
@@ -291,11 +302,22 @@ function minDepositFor(driver, categoryOverride) {
   return Math.round(country.minWalletBalance * multiplier);
 }
 
+// Resolves the real commission rate for a category+subType, checking
+// the admin-editable override first (settings.js), then the category's
+// own default (categories.js), then the global env var as a last
+// resort. Single source of truth so drivers.js and server.js never
+// disagree on what a driver actually gets charged.
+async function getEffectiveCommissionRate(category, subType) {
+  const override = await settings.getCommissionOverride(category, subType);
+  if (override !== null) return override;
+  const categoryRate = categories.commissionRateFor(category, subType);
+  return categoryRate !== null ? categoryRate : COMMISSION_RATE;
+}
+
 async function walletView(driver) {
   const { rows } = await pool.query('SELECT * FROM ledger_entries WHERE driver_id = $1 ORDER BY ts DESC', [driver.id]);
   const country = config.getCountry(driver.country);
-  const categoryRate = categories.commissionRateFor(driver.serviceCategory, driver.vehicleType);
-  const baseRate = categoryRate !== null ? categoryRate : COMMISSION_RATE;
+  const baseRate = await getEffectiveCommissionRate(driver.serviceCategory, driver.vehicleType);
   const ratingSummary = await ratings.getDriverRatingSummary(driver.id);
   const rewardEligible = ratings.isRewardEligible(ratingSummary);
   return {
@@ -328,6 +350,78 @@ function hasSufficientBalance(driver, categoryOverride) {
   const category = categoryOverride || driver.serviceCategory;
   if (!categories.getCategory(category).requiresDeposit) return true;
   return (driver.walletBalance || 0) >= minDepositFor(driver, category);
+}
+
+// A driver who topped up more than they needed had no way to get that
+// money back — this fixes it. Deducts optimistically, then attempts
+// the real payout; on failure, reverts the wallet deduction and marks
+// the ledger entry so an admin can see and investigate it.
+// Updates a provider's fixed rate WITHOUT resetting their approval
+// status — before this, any change (even just adjusting a price) had
+// to go through the full resubmit-and-wait-for-admin-approval flow,
+// real friction for something that should be a two-second edit. Can
+// target either the driver's primary registration or a secondary
+// offering (e.g. updating just their delivery rate, not their
+// household rate, when they offer both).
+async function updateFixedRate(driverId, fixedRate, category, subType) {
+  if (!fixedRate || fixedRate <= 0) return { error: 'Enter a valid rate' };
+  const driver = await findById(driverId);
+  if (!driver) return { error: 'Driver not found' };
+
+  const targetsPrimary = !category || (category === driver.serviceCategory && (!subType || subType === driver.vehicleType));
+  if (targetsPrimary) {
+    const pricingModel = categories.pricingModelFor(driver.serviceCategory, driver.vehicleType);
+    if (pricingModel !== 'fixed_by_provider') return { error: 'This category doesn\'t use a provider-set rate' };
+    await pool.query('UPDATE drivers SET fixed_rate = $1 WHERE id = $2', [fixedRate, driverId]);
+    return { driver: await findById(driverId) };
+  }
+
+  const pricingModel = categories.pricingModelFor(category, subType);
+  if (pricingModel !== 'fixed_by_provider') return { error: 'This category doesn\'t use a provider-set rate' };
+  await addOffering(driverId, category, subType, fixedRate); // ON CONFLICT DO UPDATE — this updates the existing offering's rate
+  return { driver: await findById(driverId) };
+}
+
+async function requestWithdrawal(driverId, amount) {
+  const driver = await findById(driverId);
+  if (!driver) return { error: 'Driver not found' };
+  if (!amount || amount <= 0) return { error: 'Enter a valid amount', driver };
+  if ((driver.walletBalance || 0) < amount) return { error: 'Insufficient wallet balance', driver };
+
+  const entryId = nextId('led');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      'UPDATE drivers SET wallet_balance = wallet_balance - $1 WHERE id = $2',
+      [amount, driverId]
+    );
+    await client.query(
+      `INSERT INTO ledger_entries (id, driver_id, type, amount, status, note, ts) VALUES ($1,$2,'withdrawal',$3,'pending',$4,$5)`,
+      [entryId, driverId, -amount, 'Withdrawal to mobile money', Date.now()]
+    );
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  const country = config.getCountry(driver.country);
+  try {
+    const payout = await payments.flwPayoutToMobileMoney({
+      amount, currency: country.currency, phoneNumber: driver.phone,
+      reference: `${entryId}_withdrawal`, narration: 'GoFair wallet withdrawal'
+    });
+    await pool.query(`UPDATE ledger_entries SET status = 'confirmed', momo_ref = $1 WHERE id = $2`, [payout.transferId, entryId]);
+    return { driver: await findById(driverId), entryId, status: 'confirmed' };
+  } catch (e) {
+    // Payout failed — refund the wallet and flag the entry so an admin can investigate
+    await pool.query('UPDATE drivers SET wallet_balance = wallet_balance + $1 WHERE id = $2', [amount, driverId]);
+    await pool.query(`UPDATE ledger_entries SET status = 'failed', note = $1 WHERE id = $2`, ['Withdrawal payout failed: ' + e.message, entryId]);
+    return { driver: await findById(driverId), entryId, status: 'failed', error: 'Withdrawal failed — your balance has been restored. Please try again.' };
+  }
 }
 
 async function requestTopup(driverId, amount, momoRef) {
@@ -508,7 +602,7 @@ module.exports = {
   publicDriverView, registerOrResubmit, login,
   signDriverToken, verifyDriverToken, signAdminToken, verifyAdminToken,
   listByStatus, setStatus, findById, getDocumentDiskPath,
-  walletView, hasSufficientBalance, requestTopup, listPendingTopups, decideTopup, deductCommission,
+  walletView, hasSufficientBalance, requestTopup, requestWithdrawal, updateFixedRate, getEffectiveCommissionRate, listPendingTopups, decideTopup, deductCommission,
   createProviderTopup, attachProviderReference, getTopupEntry, findTopupByEntryIdGlobal,
   createCardFarePayment, getCardFarePayment, updateCardFarePayment, listCardFarePayments,
   createSupportReport, listSupportReports, resolveSupportReport,
