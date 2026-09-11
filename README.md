@@ -871,3 +871,47 @@ number, and the higher calculator figure may reflect airport-transfer
 or premium pricing rather than everyday local fares. **Worth watching
 closely as more real Malawi testing happens** — this is the one number
 in the whole rate table resting on judgment rather than solid data.
+
+## All five categories now activated, plus multi-category providers
+
+`ACTIVE_CATEGORIES` is now `['ride', 'delivery', 'household', 'waste',
+'gig']` — every category built this session is live in the config.
+
+### A real architectural addition: one provider, multiple categories
+A driver can now register for more than one category on the same
+verified identity — the explicit example: a motorcycle rider offering
+both passenger rides and deliveries on the same bike, same ID, same
+wallet. Built with a new `driver_offerings` table rather than
+overloading the existing single-category fields, so:
+
+- **Identity is verified once** (ID, selfie, vehicle, referee if
+  needed) — approving the driver approves every offering they listed
+- **Each offering is matched completely independently** — a driver only
+  appears in a category's request pool if they're actually eligible for
+  *that* category's deposit/referee requirements, not an all-or-nothing
+  check across everything they've registered
+- **One shared wallet, correctly charged per category** — commission and
+  deposit rules apply per-transaction based on which category the job
+  actually was, not the driver's "primary" registration
+
+**Tested directly, not just designed**: registered one driver as
+primary=ride with delivery as an additional offering, confirmed they
+received both a ride request AND a delivery request in their live feed,
+and successfully bid on both using the one wallet and one approved
+identity.
+
+### Registration form updated
+After choosing a primary category, drivers now see "Also offer any of
+these on the same identity?" with the other active categories as
+checkboxes — checking one reveals its own sub-type choice (and a rate
+input, for categories like household services that need one).
+
+### Honest scope limit — the rider side still needs its own picker
+Everything above is proven correct on the backend and in driver
+registration. **The rider-facing request screen has not been updated
+yet** — a customer opening the app today still only sees the original
+ride request flow, with no way to ask for a plumber, a delivery, a
+waste pickup, or gig help. Activating the categories and enabling
+multi-category providers was real, necessary groundwork, but a
+customer literally cannot request anything but a ride until that
+screen exists. That's the next real piece of work, not yet started.

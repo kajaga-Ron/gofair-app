@@ -93,7 +93,49 @@ async function findById(id) {
   return rowToDriver(rows[0]);
 }
 
-async function registerOrResubmit({ phone, password, fullName, country, serviceCategory, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, trustRefereeName, trustRefereePhone, trustRefereeType, fixedRate, documentPhoto, selfie }) {
+// ---------------- Multi-category offerings ----------------
+// A driver's identity (ID, vehicle, referee) is verified once. Their
+// PRIMARY category/sub-type lives directly on the drivers row (unchanged
+// from before this feature — every existing check still works exactly
+// as it did). Anything BEYOND that first category is an "offering" —
+// e.g. a ride driver who also wants to carry deliveries on the same
+// motorcycle registers delivery as a second offering, reusing the same
+// verified identity rather than creating a whole separate account.
+
+async function addOffering(driverId, category, subType, fixedRate) {
+  const id = nextId('off');
+  await pool.query(
+    `INSERT INTO driver_offerings (id, driver_id, category, sub_type, fixed_rate, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (driver_id, category, sub_type) DO UPDATE SET fixed_rate = EXCLUDED.fixed_rate`,
+    [id, driverId, category, subType, fixedRate || null, Date.now()]
+  );
+}
+
+async function getOfferings(driverId) {
+  const { rows } = await pool.query('SELECT * FROM driver_offerings WHERE driver_id = $1', [driverId]);
+  return rows.map(r => ({ category: r.category, subType: r.sub_type, fixedRate: r.fixed_rate ? Number(r.fixed_rate) : null }));
+}
+
+// The full list a driver can be matched against: their primary
+// registration PLUS every additional offering, all in one shape.
+async function getAllOfferings(driver) {
+  const extra = await getOfferings(driver.id);
+  return [{ category: driver.serviceCategory, subType: driver.vehicleType, fixedRate: driver.fixedRate }, ...extra];
+}
+
+// Resolves the right fixed rate for a category+subType that might be
+// the driver's primary registration OR a secondary offering — each can
+// have its own rate (e.g. a plumber might charge differently for
+// electrical work if they offer both).
+async function getEffectiveFixedRate(driver, category, subType) {
+  if (driver.serviceCategory === category && driver.vehicleType === subType) return driver.fixedRate;
+  const offerings = await getOfferings(driver.id);
+  const match = offerings.find(o => o.category === category && o.subType === subType);
+  return match ? match.fixedRate : null;
+}
+
+async function registerOrResubmit({ phone, password, fullName, country, serviceCategory, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, trustRefereeName, trustRefereePhone, trustRefereeType, fixedRate, additionalOfferings, documentPhoto, selfie }) {
   const existing = await findByPhone(phone);
   if (existing && existing.status === 'approved') {
     return { error: 'An approved driver account already exists for this phone number. Please log in instead.' };
@@ -114,6 +156,30 @@ async function registerOrResubmit({ phone, password, fullName, country, serviceC
   }
   if (pricingModel === 'fixed_by_provider' && (!fixedRate || fixedRate <= 0)) {
     return { error: `Set the rate you charge for this work — customers will see this price upfront before booking you.` };
+  }
+
+  // Validate every additional offering the same way the primary one was
+  // validated — same identity (vehicle, referee) covers all of them, but
+  // each offering's own category rules (vehicle requirement, fixed rate)
+  // still need to hold.
+  const validOfferings = [];
+  for (const off of (additionalOfferings || [])) {
+    if (!categories.isValidCategory(off.category) || !categories.isValidSubType(off.category, off.subType)) {
+      return { error: `Invalid additional offering: ${off.category || 'unknown'}.` };
+    }
+    if (off.category === categoryCode && off.subType === vehicleType) continue; // same as primary — skip, not a real "additional" offering
+    const offDef = categories.getCategory(off.category);
+    const offPricingModel = categories.pricingModelFor(off.category, off.subType);
+    if (offDef.requiresVehicle && !vehiclePlate) {
+      return { error: `${offDef.label} needs a registered vehicle — add your vehicle details first.` };
+    }
+    if (offDef.requiresTrustReferee && (!trustRefereeName || !trustRefereePhone)) {
+      return { error: `${offDef.label} requires a referee — add referee details to offer this too.` };
+    }
+    if (offPricingModel === 'fixed_by_provider' && (!off.fixedRate || off.fixedRate <= 0)) {
+      return { error: `Set your rate for ${offDef.label.toLowerCase()} before adding it as an offering.` };
+    }
+    validOfferings.push(off);
   }
 
   const passwordHash = bcrypt.hashSync(password, 10);
@@ -148,6 +214,9 @@ async function registerOrResubmit({ phone, password, fullName, country, serviceC
         vehicleType, vehiclePlate, vehicleModel, vehicleColor,
         trustRefereeName || null, trustRefereePhone || null, trustRefereeType || null, storedFixedRate,
         documentPhotoPath, selfiePath, Date.now()]);
+  }
+  for (const off of validOfferings) {
+    await addOffering(id, off.category, off.subType, off.fixedRate || null);
   }
   return { driver: await findById(id) };
 }
@@ -214,8 +283,8 @@ async function getDocumentDiskPath(driverId, field) {
 // categories, like household services, use a trust referee instead of
 // a cash deposit; delivery couriers carry a smaller per-job risk than a
 // ride driver, so their deposit is a fraction of the ride amount).
-function minDepositFor(driver) {
-  const categoryDef = categories.getCategory(driver.serviceCategory);
+function minDepositFor(driver, categoryOverride) {
+  const categoryDef = categories.getCategory(categoryOverride || driver.serviceCategory);
   if (!categoryDef.requiresDeposit) return 0;
   const country = config.getCountry(driver.country);
   const multiplier = categoryDef.minDepositMultiplier || 1;
@@ -254,10 +323,11 @@ function isFreeTrialMode() {
   return process.env.FREE_TRIAL_MODE === 'true';
 }
 
-function hasSufficientBalance(driver) {
+function hasSufficientBalance(driver, categoryOverride) {
   if (isFreeTrialMode()) return true;
-  if (!categories.getCategory(driver.serviceCategory).requiresDeposit) return true;
-  return (driver.walletBalance || 0) >= minDepositFor(driver);
+  const category = categoryOverride || driver.serviceCategory;
+  if (!categories.getCategory(category).requiresDeposit) return true;
+  return (driver.walletBalance || 0) >= minDepositFor(driver, category);
 }
 
 async function requestTopup(driverId, amount, momoRef) {
@@ -442,5 +512,6 @@ module.exports = {
   createProviderTopup, attachProviderReference, getTopupEntry, findTopupByEntryIdGlobal,
   createCardFarePayment, getCardFarePayment, updateCardFarePayment, listCardFarePayments,
   createSupportReport, listSupportReports, resolveSupportReport,
+  addOffering, getOfferings, getAllOfferings, getEffectiveFixedRate,
   isFreeTrialMode, COMMISSION_RATE, ADMIN_PASSWORD
 };

@@ -105,6 +105,22 @@ async function initSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_card_fare_driver ON card_fare_payments(driver_id);
 
+    -- A driver's identity (ID, vehicle, referee) is verified once, but
+    -- they can offer MULTIPLE service categories on that one identity —
+    -- e.g. the same motorcycle and rider doing both passenger rides and
+    -- deliveries. Each row is one category+sub-type combination they're
+    -- registered for; approving the driver approves every offering they
+    -- listed at once, since it's the same underlying identity check.
+    CREATE TABLE IF NOT EXISTS driver_offerings (
+      id           TEXT PRIMARY KEY,
+      driver_id    TEXT NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+      category     TEXT NOT NULL,
+      sub_type     TEXT NOT NULL,
+      fixed_rate   BIGINT, -- only meaningful for 'fixed_by_provider' categories (household services)
+      created_at   BIGINT NOT NULL,
+      UNIQUE(driver_id, category, sub_type)
+    );
+
     CREATE TABLE IF NOT EXISTS support_reports (
       id             TEXT PRIMARY KEY,
       reporter_role  TEXT NOT NULL,     -- 'rider' | 'driver'

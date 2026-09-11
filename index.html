@@ -250,9 +250,14 @@
         <h2>Become a provider</h2>
         <p class="sub">Your account is reviewed before you can see or bid on requests.</p>
 
-        <p class="sub" style="margin-bottom:6px;">What kind of work will you offer?</p>
+        <p class="sub" style="margin-bottom:6px;">What's the main kind of work you'll offer?</p>
         <div class="field-stack" style="margin-bottom:12px;">
           <div class="field"><select id="regCategory" style="border:none;outline:none;font-size:14.5px;flex:1;font-family:inherit;background:transparent;width:100%;padding:2px 0;"><option value="">Loading…</option></select></div>
+        </div>
+
+        <div id="regAdditionalWrap" class="hidden" style="margin-bottom:12px;">
+          <p class="sub" style="margin-bottom:6px;">Also offer any of these on the same identity? (e.g. carry deliveries on the same motorcycle)</p>
+          <div id="regAdditionalCategories"></div>
         </div>
 
         <p class="sub" style="margin-bottom:6px;">Which country will you work in?</p>
@@ -1397,6 +1402,47 @@ function updateRegCategoryDependentUI(){
   const isFixedByProvider = category.subTypes.some(s=>s.pricingModel === 'fixed_by_provider');
   document.getElementById('regFixedRateFields').classList.toggle('hidden', !isFixedByProvider);
   updateRegDepositNote();
+  renderAdditionalCategoryOptions(category.code);
+}
+function renderAdditionalCategoryOptions(primaryCode){
+  const others = regCategoriesList.filter(c=>c.code !== primaryCode);
+  const wrap = document.getElementById('regAdditionalWrap');
+  const container = document.getElementById('regAdditionalCategories');
+  if (!others.length){ wrap.classList.add('hidden'); container.innerHTML=''; return; }
+  wrap.classList.remove('hidden');
+  container.innerHTML = others.map(c => `
+    <label class="doctype-box" style="display:block;margin-bottom:8px;">
+      <input type="checkbox" class="regAddCatCheck" value="${c.code}"> ${c.label}
+      <div class="hidden" id="regAddPanel-${c.code}" style="margin-top:8px;padding:10px;background:var(--paper-dim);border-radius:10px;">
+        <div class="doctype-row" style="margin-bottom:8px;">
+          ${c.subTypes.map((s,i)=>`<label class="doctype-box${i===0?' checked':''}"><input type="radio" name="regAddSub-${c.code}" value="${s.value}"${i===0?' checked':''}> ${s.label}</label>`).join('')}
+        </div>
+        ${c.subTypes.some(s=>s.pricingModel==='fixed_by_provider') ? `<input type="number" class="regAddFixedRate" data-cat="${c.code}" placeholder="Your rate for this" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;">` : ''}
+      </div>
+    </label>
+  `).join('');
+  container.querySelectorAll('.regAddCatCheck').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      document.getElementById(`regAddPanel-${cb.value}`).classList.toggle('hidden', !cb.checked);
+    });
+  });
+  container.querySelectorAll('[name^="regAddSub-"]').forEach(radio=>{
+    radio.addEventListener('change', ()=>{
+      radio.closest('.doctype-row').querySelectorAll('.doctype-box').forEach(b=>b.classList.remove('checked'));
+      radio.closest('.doctype-box').classList.add('checked');
+    });
+  });
+}
+function collectAdditionalOfferings(){
+  const offerings = [];
+  document.querySelectorAll('.regAddCatCheck:checked').forEach(cb=>{
+    const cat = cb.value;
+    const subType = document.querySelector(`input[name="regAddSub-${cat}"]:checked`)?.value;
+    const rateInput = document.querySelector(`.regAddFixedRate[data-cat="${cat}"]`);
+    const fixedRate = rateInput ? Number(rateInput.value.trim()) : undefined;
+    if (subType) offerings.push({ category: cat, subType, fixedRate });
+  });
+  return offerings;
 }
 function updateRegDepositNote(){
   const category = regCategoriesList.find(c=>c.code===document.getElementById('regCategory').value);
@@ -1458,7 +1504,7 @@ document.getElementById('btnSubmitRegistration').onclick = async ()=>{
       body: JSON.stringify({
         fullName, phone, password, country: document.getElementById('regCountry').value || myCountry,
         serviceCategory, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor,
-        trustRefereeName, trustRefereePhone, trustRefereeType, fixedRate, documentPhoto, selfie
+        trustRefereeName, trustRefereePhone, trustRefereeType, fixedRate, additionalOfferings: collectAdditionalOfferings(), documentPhoto, selfie
       })
     });
     const data = await res.json();

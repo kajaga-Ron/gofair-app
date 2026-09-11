@@ -49,7 +49,7 @@ app.get('/api/config/categories', (req, res) => {
 });
 
 app.post('/api/driver/register', async (req, res) => {
-  const { phone, password, fullName, country, serviceCategory, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, trustRefereeName, trustRefereePhone, trustRefereeType, fixedRate, documentPhoto, selfie } = req.body || {};
+  const { phone, password, fullName, country, serviceCategory, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, trustRefereeName, trustRefereePhone, trustRefereeType, fixedRate, additionalOfferings, documentPhoto, selfie } = req.body || {};
   if (!phone || !password || !fullName || !documentPhoto || !selfie) {
     return res.status(400).json({ error: 'Missing required fields.' });
   }
@@ -64,7 +64,7 @@ app.post('/api/driver/register', async (req, res) => {
   // enforces this (and the trust-referee requirement) against the real
   // category definition, so server.js doesn't hardcode "always need a plate" anymore.
   try {
-    const result = await drivers.registerOrResubmit({ phone, password, fullName, country, serviceCategory: categoryCode, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, trustRefereeName, trustRefereePhone, trustRefereeType, fixedRate, documentPhoto, selfie });
+    const result = await drivers.registerOrResubmit({ phone, password, fullName, country, serviceCategory: categoryCode, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, trustRefereeName, trustRefereePhone, trustRefereeType, fixedRate, additionalOfferings, documentPhoto, selfie });
     if (result.error) return res.status(400).json({ error: result.error });
     const token = drivers.signDriverToken(result.driver);
     res.json({ token, driver: drivers.publicDriverView(result.driver) });
@@ -558,12 +558,25 @@ async function admitDriverIfEligible(socketId, driver) {
   }
   const wallet = await drivers.walletView(driver);
   socket.emit('driver:status', { status: 'approved', wallet });
-  if (!drivers.hasSufficientBalance(driver)) return; // approved, but can't join the pool until topped up
 
-  socket.join(driverRoom(driver.country, driver.serviceCategory || 'ride', driver.vehicleType));
-  const open = Array.from(requests.values())
-    .filter((r) => r.status === 'open' && r.vehicleType === driver.vehicleType && r.country === driver.country && (r.serviceCategory || 'ride') === (driver.serviceCategory || 'ride'))
-    .map(requestPublicView);
+  // A driver can offer more than one category on the same verified
+  // identity (e.g. ride + delivery on the same motorcycle) — each
+  // offering is matched independently, with its own deposit check,
+  // rather than the driver being all-or-nothing across every category
+  // they've registered.
+  const offerings = await drivers.getAllOfferings(driver);
+  socket.data.offerings = offerings;
+
+  const eligibleOfferings = offerings.filter(o => drivers.hasSufficientBalance(driver, o.category));
+  if (!eligibleOfferings.length) return; // approved, but not funded for anything they're registered to offer yet
+
+  const open = [];
+  for (const o of eligibleOfferings) {
+    socket.join(driverRoom(driver.country, o.category, o.subType));
+    Array.from(requests.values())
+      .filter((r) => r.status === 'open' && r.vehicleType === o.subType && r.country === driver.country && (r.serviceCategory || 'ride') === o.category)
+      .forEach(r => open.push(requestPublicView(r)));
+  }
   socket.emit('ride:list', open);
 }
 
@@ -682,9 +695,12 @@ io.on('connection', (socket) => {
 // isn't 'negotiate' — a driver's app could send any number it wants, but
 // for fixed pricing that number is never trusted; it's computed here
 // from the driver's own set rate or the country's published rate.
-function resolveFixedPrice(pricingModel, driverRecord, request) {
+async function resolveFixedPrice(pricingModel, driverRecord, request) {
   const country = config.getCountry(request.country);
-  if (pricingModel === 'fixed_by_provider') return driverRecord.fixedRate || 0;
+  if (pricingModel === 'fixed_by_provider') {
+    const rate = await drivers.getEffectiveFixedRate(driverRecord, request.serviceCategory || 'ride', request.vehicleType);
+    return rate || 0;
+  }
   if (pricingModel === 'fixed_platform_rate') return (country.wasteRates && country.wasteRates.collectionFee) || 0;
   if (pricingModel === 'fixed_per_kg') {
     // 'km' doubles as the recyclables' weight in kilograms for this
@@ -701,17 +717,22 @@ function resolveFixedPrice(pricingModel, driverRecord, request) {
       return ack && ack({ error: 'Your driver account is not approved yet.' });
     }
     const driverRecord = await drivers.findById(socket.data.driverId);
-    if (!driverRecord || !drivers.hasSufficientBalance(driverRecord)) {
-      return ack && ack({ error: 'Top up your wallet before accepting rides.' });
-    }
+    if (!driverRecord) return ack && ack({ error: 'Driver not found.' });
     const r = requests.get(requestId);
     if (!r || r.status !== 'open') return ack && ack({ error: 'request no longer open' });
-    if (r.vehicleType !== socket.data.vehicleType || (r.serviceCategory || 'ride') !== (socket.data.serviceCategory || 'ride')) {
+
+    const requestCategory = r.serviceCategory || 'ride';
+    const offerings = socket.data.offerings || [{ category: socket.data.serviceCategory, subType: socket.data.vehicleType }];
+    const matchesAnOffering = offerings.some(o => o.category === requestCategory && o.subType === r.vehicleType);
+    if (!matchesAnOffering) {
       return ack && ack({ error: 'category or sub-type mismatch' });
     }
+    if (!drivers.hasSufficientBalance(driverRecord, requestCategory)) {
+      return ack && ack({ error: 'Top up your wallet before accepting rides.' });
+    }
 
-    const pricingModel = categories.pricingModelFor(r.serviceCategory || 'ride', r.vehicleType);
-    const fixedPrice = resolveFixedPrice(pricingModel, driverRecord, r);
+    const pricingModel = categories.pricingModelFor(requestCategory, r.vehicleType);
+    const fixedPrice = await resolveFixedPrice(pricingModel, driverRecord, r);
     const openingPrice = fixedPrice !== null ? fixedPrice : price;
 
     const id = nextId('thr');

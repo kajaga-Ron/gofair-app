@@ -102,7 +102,7 @@ const CATEGORIES = {
   }
 };
 
-const ACTIVE_CATEGORIES = ['ride']; // same "configured but not switched on" pattern as countries — flip these on deliberately, one at a time
+const ACTIVE_CATEGORIES = ['ride', 'delivery', 'household', 'waste', 'gig'];
 
 function isValidCategory(code) {
   return Object.prototype.hasOwnProperty.call(CATEGORIES, code);
