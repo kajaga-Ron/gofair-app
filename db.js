@@ -37,8 +37,8 @@ async function initSchema() {
       country          TEXT NOT NULL DEFAULT 'UG',
       document_type    TEXT NOT NULL,
       document_number  TEXT NOT NULL,
-      vehicle_type     TEXT NOT NULL,
-      vehicle_plate    TEXT NOT NULL,
+      vehicle_type     TEXT, -- doubles as "sub-type" for every category now (e.g. household's 'plumbing', gig's 'errands'), not just a literal vehicle — nullable since non-vehicle categories still need it filled in, just with a different meaning than the column name suggests
+      vehicle_plate    TEXT, -- null for non-vehicle categories (household services, most gig work)
       vehicle_model    TEXT,
       vehicle_color    TEXT,
       document_photo_path TEXT,
@@ -51,6 +51,13 @@ async function initSchema() {
     );
     ALTER TABLE drivers ADD COLUMN IF NOT EXISTS country TEXT NOT NULL DEFAULT 'UG';
     ALTER TABLE drivers ADD COLUMN IF NOT EXISTS vehicle_color TEXT;
+    ALTER TABLE drivers ALTER COLUMN vehicle_type DROP NOT NULL;
+    ALTER TABLE drivers ALTER COLUMN vehicle_plate DROP NOT NULL;
+    ALTER TABLE drivers ADD COLUMN IF NOT EXISTS service_category TEXT NOT NULL DEFAULT 'ride';
+    ALTER TABLE drivers ADD COLUMN IF NOT EXISTS trust_referee_name TEXT;
+    ALTER TABLE drivers ADD COLUMN IF NOT EXISTS trust_referee_phone TEXT;
+    ALTER TABLE drivers ADD COLUMN IF NOT EXISTS trust_referee_type TEXT; -- 'lc1' | 'personal'
+    ALTER TABLE drivers ADD COLUMN IF NOT EXISTS fixed_rate BIGINT; -- provider's own set rate, for categories priced 'fixed_by_provider' (e.g. household services) — null for negotiated categories
 
     CREATE TABLE IF NOT EXISTS ledger_entries (
       id                   TEXT PRIMARY KEY,

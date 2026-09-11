@@ -14,6 +14,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pool } = require('./db');
 const documents = require('./documents');
+const ratings = require('./ratings');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-secret-change-this';
 if (JWT_SECRET === 'dev-only-secret-change-this') {
@@ -35,6 +36,7 @@ function nextId(prefix = 'drv') {
 // ---- row <-> JS object mapping (DB is snake_case, JS stays camelCase) ----
 
 const config = require('./config');
+const categories = require('./categories');
 
 function rowToDriver(row) {
   if (!row) return null;
@@ -44,12 +46,17 @@ function rowToDriver(row) {
     passwordHash: row.password_hash,
     fullName: row.full_name,
     country: row.country || config.DEFAULT_COUNTRY,
+    serviceCategory: row.service_category || 'ride',
     documentType: row.document_type,
     documentNumber: row.document_number,
-    vehicleType: row.vehicle_type,
+    vehicleType: row.vehicle_type, // doubles as sub-type for non-vehicle categories
     vehiclePlate: row.vehicle_plate,
     vehicleModel: row.vehicle_model,
     vehicleColor: row.vehicle_color,
+    trustRefereeName: row.trust_referee_name,
+    trustRefereePhone: row.trust_referee_phone,
+    trustRefereeType: row.trust_referee_type,
+    fixedRate: row.fixed_rate ? Number(row.fixed_rate) : null,
     status: row.status,
     reviewNote: row.review_note,
     submittedAt: Number(row.submitted_at),
@@ -86,12 +93,28 @@ async function findById(id) {
   return rowToDriver(rows[0]);
 }
 
-async function registerOrResubmit({ phone, password, fullName, country, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, documentPhoto, selfie }) {
+async function registerOrResubmit({ phone, password, fullName, country, serviceCategory, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, trustRefereeName, trustRefereePhone, trustRefereeType, fixedRate, documentPhoto, selfie }) {
   const existing = await findByPhone(phone);
   if (existing && existing.status === 'approved') {
     return { error: 'An approved driver account already exists for this phone number. Please log in instead.' };
   }
   const countryCode = config.isValidCountry(country) ? country : config.DEFAULT_COUNTRY;
+  const categoryCode = categories.isValidCategory(serviceCategory) ? serviceCategory : 'ride';
+  const categoryDef = categories.getCategory(categoryCode);
+  const pricingModel = categories.pricingModelFor(categoryCode, vehicleType);
+
+  if (categoryDef.requiresVehicle && (!vehicleType || !vehiclePlate)) {
+    return { error: `${categoryDef.label} requires a vehicle type and plate number.` };
+  }
+  if (!categoryDef.requiresVehicle && !vehicleType) {
+    return { error: `Choose what kind of ${categoryDef.label.toLowerCase()} you're offering.` };
+  }
+  if (categoryDef.requiresTrustReferee && (!trustRefereeName || !trustRefereePhone)) {
+    return { error: `${categoryDef.label} requires a referee's name and phone number — someone who can vouch for you, such as your LC1 chairperson.` };
+  }
+  if (pricingModel === 'fixed_by_provider' && (!fixedRate || fixedRate <= 0)) {
+    return { error: `Set the rate you charge for this work — customers will see this price upfront before booking you.` };
+  }
 
   const passwordHash = bcrypt.hashSync(password, 10);
   const id = existing ? existing.id : nextId();
@@ -99,26 +122,32 @@ async function registerOrResubmit({ phone, password, fullName, country, document
   // Save photos to disk AFTER we know the driver id, so they land in that driver's folder
   const documentPhotoPath = documents.saveDocument(id, 'document', documentPhoto);
   const selfiePath = documents.saveDocument(id, 'selfie', selfie);
+  const storedFixedRate = pricingModel === 'fixed_by_provider' ? fixedRate : null;
 
   if (existing) {
     await pool.query(`
       UPDATE drivers SET
-        password_hash = $1, full_name = $2, country = $3, document_type = $4, document_number = $5,
-        vehicle_type = $6, vehicle_plate = $7, vehicle_model = $8, vehicle_color = $9,
-        document_photo_path = $10, selfie_path = $11,
-        status = 'pending', review_note = '', submitted_at = $12, reviewed_at = NULL
-      WHERE id = $13
-    `, [passwordHash, fullName, countryCode, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor,
+        password_hash = $1, full_name = $2, country = $3, service_category = $4, document_type = $5, document_number = $6,
+        vehicle_type = $7, vehicle_plate = $8, vehicle_model = $9, vehicle_color = $10,
+        trust_referee_name = $11, trust_referee_phone = $12, trust_referee_type = $13, fixed_rate = $14,
+        document_photo_path = $15, selfie_path = $16,
+        status = 'pending', review_note = '', submitted_at = $17, reviewed_at = NULL
+      WHERE id = $18
+    `, [passwordHash, fullName, countryCode, categoryCode, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor,
+        trustRefereeName || null, trustRefereePhone || null, trustRefereeType || null, storedFixedRate,
         documentPhotoPath, selfiePath, Date.now(), id]);
   } else {
     await pool.query(`
       INSERT INTO drivers (
-        id, phone, password_hash, full_name, country, document_type, document_number,
-        vehicle_type, vehicle_plate, vehicle_model, vehicle_color, document_photo_path, selfie_path,
-        status, review_note, submitted_at, wallet_balance
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending','',$14,0)
-    `, [id, phone, passwordHash, fullName, countryCode, documentType, documentNumber,
-        vehicleType, vehiclePlate, vehicleModel, vehicleColor, documentPhotoPath, selfiePath, Date.now()]);
+        id, phone, password_hash, full_name, country, service_category, document_type, document_number,
+        vehicle_type, vehicle_plate, vehicle_model, vehicle_color,
+        trust_referee_name, trust_referee_phone, trust_referee_type, fixed_rate,
+        document_photo_path, selfie_path, status, review_note, submitted_at, wallet_balance
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pending','',$19,0)
+    `, [id, phone, passwordHash, fullName, countryCode, categoryCode, documentType, documentNumber,
+        vehicleType, vehiclePlate, vehicleModel, vehicleColor,
+        trustRefereeName || null, trustRefereePhone || null, trustRefereeType || null, storedFixedRate,
+        documentPhotoPath, selfiePath, Date.now()]);
   }
   return { driver: await findById(id) };
 }
@@ -180,15 +209,37 @@ async function getDocumentDiskPath(driverId, field) {
 
 // ---------------- Wallet: top-ups + commission ----------------
 
+// The real minimum balance for THIS driver — depends on both their
+// country (currency/cost of living) and their service category (some
+// categories, like household services, use a trust referee instead of
+// a cash deposit; delivery couriers carry a smaller per-job risk than a
+// ride driver, so their deposit is a fraction of the ride amount).
+function minDepositFor(driver) {
+  const categoryDef = categories.getCategory(driver.serviceCategory);
+  if (!categoryDef.requiresDeposit) return 0;
+  const country = config.getCountry(driver.country);
+  const multiplier = categoryDef.minDepositMultiplier || 1;
+  return Math.round(country.minWalletBalance * multiplier);
+}
+
 async function walletView(driver) {
   const { rows } = await pool.query('SELECT * FROM ledger_entries WHERE driver_id = $1 ORDER BY ts DESC', [driver.id]);
   const country = config.getCountry(driver.country);
+  const categoryRate = categories.commissionRateFor(driver.serviceCategory, driver.vehicleType);
+  const baseRate = categoryRate !== null ? categoryRate : COMMISSION_RATE;
+  const ratingSummary = await ratings.getDriverRatingSummary(driver.id);
+  const rewardEligible = ratings.isRewardEligible(ratingSummary);
   return {
     walletBalance: driver.walletBalance || 0,
-    minBalance: country.minWalletBalance,
+    minBalance: minDepositFor(driver),
     currency: country.currency,
-    commissionRate: COMMISSION_RATE,
+    commissionRate: ratings.applyRewardDiscount(baseRate, ratingSummary),
+    baseCommissionRate: baseRate,
+    rewardEligible,
+    rewardThreshold: { minRating: ratings.REWARD_MIN_RATING, minCompleted: ratings.REWARD_MIN_COMPLETED, discount: ratings.REWARD_COMMISSION_DISCOUNT },
+    currentRating: ratingSummary,
     freeTrialMode: isFreeTrialMode(),
+    depositRequired: categories.getCategory(driver.serviceCategory).requiresDeposit,
     ledger: rows.map(rowToLedgerEntry)
   };
 }
@@ -205,8 +256,8 @@ function isFreeTrialMode() {
 
 function hasSufficientBalance(driver) {
   if (isFreeTrialMode()) return true;
-  const country = config.getCountry(driver.country);
-  return (driver.walletBalance || 0) >= country.minWalletBalance;
+  if (!categories.getCategory(driver.serviceCategory).requiresDeposit) return true;
+  return (driver.walletBalance || 0) >= minDepositFor(driver);
 }
 
 async function requestTopup(driverId, amount, momoRef) {
@@ -294,8 +345,9 @@ async function findTopupByEntryIdGlobal(entryId) {
   return { driverId: rows[0].driver_id, entry: rowToLedgerEntry(rows[0]) };
 }
 
-async function deductCommission(driverId, fareAmount) {
-  const commission = Math.round(fareAmount * COMMISSION_RATE);
+async function deductCommission(driverId, fareAmount, rateOverride) {
+  const rate = rateOverride !== undefined && rateOverride !== null ? rateOverride : COMMISSION_RATE;
+  const commission = Math.round(fareAmount * rate);
   const client = await pool.connect();
   let newBalance;
   try {
@@ -303,7 +355,7 @@ async function deductCommission(driverId, fareAmount) {
     const entry = { id: nextId('led'), ts: Date.now() };
     await client.query(
       `INSERT INTO ledger_entries (id, driver_id, type, amount, status, note, ts) VALUES ($1,$2,'commission',$3,'applied',$4,$5)`,
-      [entry.id, driverId, -commission, `7% commission on UGX ${fareAmount.toLocaleString()} ride`, entry.ts]
+      [entry.id, driverId, -commission, `${Math.round(rate * 100)}% commission on ${fareAmount.toLocaleString()}`, entry.ts]
     );
     const { rows } = await client.query(
       'UPDATE drivers SET wallet_balance = wallet_balance - $1 WHERE id = $2 RETURNING wallet_balance',

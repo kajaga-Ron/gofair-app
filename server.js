@@ -20,6 +20,7 @@ const path = require('path');
 const { Server } = require('socket.io');
 const { initSchema } = require('./db');
 const config = require('./config');
+const categories = require('./categories');
 const drivers = require('./drivers');
 const riders = require('./riders');
 const ratings = require('./ratings');
@@ -43,19 +44,27 @@ app.get('/api/config/countries', (req, res) => {
   res.json({ countries: config.publicCountryList(), allCountries: config.fullCountryList(), defaultCountry: config.DEFAULT_COUNTRY });
 });
 
+app.get('/api/config/categories', (req, res) => {
+  res.json({ categories: categories.publicCategoryList() });
+});
+
 app.post('/api/driver/register', async (req, res) => {
-  const { phone, password, fullName, country, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, documentPhoto, selfie } = req.body || {};
-  if (!phone || !password || !fullName || !vehiclePlate || !documentPhoto || !selfie) {
+  const { phone, password, fullName, country, serviceCategory, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, trustRefereeName, trustRefereePhone, trustRefereeType, fixedRate, documentPhoto, selfie } = req.body || {};
+  if (!phone || !password || !fullName || !documentPhoto || !selfie) {
     return res.status(400).json({ error: 'Missing required fields.' });
   }
   if (!['national_id', 'driving_license'].includes(documentType) || !documentNumber) {
-    return res.status(400).json({ error: 'Choose an ID type (National ID or Driving Permit/Licence) and enter its number.' });
+    return res.status(400).json({ error: 'Choose an ID type and enter its number.' });
   }
-  if (!['motorcycle', 'car'].includes(vehicleType)) {
-    return res.status(400).json({ error: 'Choose a vehicle type (Motorcycle or Car).' });
+  const categoryCode = categories.isValidCategory(serviceCategory) ? serviceCategory : 'ride';
+  if (!categories.isValidSubType(categoryCode, vehicleType)) {
+    return res.status(400).json({ error: 'Choose a valid option for what you\'re offering.' });
   }
+  // Vehicle-plate requirement is category-specific — drivers.registerOrResubmit
+  // enforces this (and the trust-referee requirement) against the real
+  // category definition, so server.js doesn't hardcode "always need a plate" anymore.
   try {
-    const result = await drivers.registerOrResubmit({ phone, password, fullName, country, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, documentPhoto, selfie });
+    const result = await drivers.registerOrResubmit({ phone, password, fullName, country, serviceCategory: categoryCode, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, trustRefereeName, trustRefereePhone, trustRefereeType, fixedRate, documentPhoto, selfie });
     if (result.error) return res.status(400).json({ error: result.error });
     const token = drivers.signDriverToken(result.driver);
     res.json({ token, driver: drivers.publicDriverView(result.driver) });
@@ -327,7 +336,8 @@ app.post('/api/rider/fare/pay/initiate', async (req, res) => {
     return res.status(400).json({ error: 'This trip is not ready for payment, or the details don\'t match.' });
   }
   const currency = config.getCountry(t.country || config.DEFAULT_COUNTRY).currency;
-  const commission = Math.round(t.finalPrice * drivers.COMMISSION_RATE);
+  const commissionRate = categories.commissionRateFor(t.serviceCategory || 'ride', t.vehicleType) ?? drivers.COMMISSION_RATE;
+  const commission = Math.round(t.finalPrice * commissionRate);
 
   const payment = await drivers.createCardFarePayment({
     threadId, driverId: t.driverId, riderPhone, fareAmount: t.finalPrice, commission, currency
@@ -426,7 +436,7 @@ function requestPublicView(r) {
   return {
     id: r.id, riderName: r.riderName, pickup: r.pickup, drop: r.drop,
     pickupName: r.pickupName, dropName: r.dropName, proposedFare: r.proposedFare,
-    vehicleType: r.vehicleType, country: r.country, km: r.km, status: r.status, createdAt: r.createdAt
+    vehicleType: r.vehicleType, serviceCategory: r.serviceCategory || 'ride', country: r.country, km: r.km, status: r.status, createdAt: r.createdAt
   };
 }
 function threadPublicView(t) {
@@ -436,8 +446,8 @@ function threadPublicView(t) {
     offers: t.offers, status: t.status
   };
 }
-function driverRoom(country, vehicleType) {
-  return `driver:${country}:${vehicleType}`;
+function driverRoom(country, category, subType) {
+  return `driver:${country}:${category}:${subType}`;
 }
 
 // ---------------- Fare suggestion: base + time-of-day + live demand ----------------
@@ -474,9 +484,9 @@ function timeOfDayMultiplier() {
 // funded) drivers for that country + vehicle type — the same signal
 // Uber/Yango call "surge," computed here from data the server already
 // has, no new infrastructure required.
-function demandMultiplier(country, vehicleType) {
-  const openCount = Array.from(requests.values()).filter(r => r.status === 'open' && r.vehicleType === vehicleType && r.country === country).length;
-  const room = io.sockets.adapter.rooms.get(driverRoom(country, vehicleType));
+function demandMultiplier(country, category, vehicleType) {
+  const openCount = Array.from(requests.values()).filter(r => r.status === 'open' && r.vehicleType === vehicleType && r.country === country && (r.serviceCategory || 'ride') === category).length;
+  const room = io.sockets.adapter.rooms.get(driverRoom(country, category, vehicleType));
   const driverCount = room ? room.size : 0;
   if (driverCount === 0) return openCount > 0 ? 1.3 : 1.0; // no one online at all — a mild nudge, not a guess at infinity
   const ratio = openCount / driverCount;
@@ -490,8 +500,8 @@ function roundToNearest(n, step) {
   return Math.round(n / step) * step;
 }
 
-async function broadcastRideToRoomTiered(country, vehicleType, requestView) {
-  const room = io.sockets.adapter.rooms.get(driverRoom(country, vehicleType));
+async function broadcastRideToRoomTiered(country, category, vehicleType, requestView) {
+  const room = io.sockets.adapter.rooms.get(driverRoom(country, category, vehicleType));
   if (!room || !room.size) return;
 
   const socketIds = Array.from(room);
@@ -539,6 +549,7 @@ async function admitDriverIfEligible(socketId, driver) {
   if (!socket) return;
   socket.data.approved = driver.status === 'approved';
   socket.data.vehicleType = driver.vehicleType;
+  socket.data.serviceCategory = driver.serviceCategory || 'ride';
   socket.data.country = driver.country;
 
   if (driver.status !== 'approved') {
@@ -549,9 +560,9 @@ async function admitDriverIfEligible(socketId, driver) {
   socket.emit('driver:status', { status: 'approved', wallet });
   if (!drivers.hasSufficientBalance(driver)) return; // approved, but can't join the pool until topped up
 
-  socket.join(driverRoom(driver.country, driver.vehicleType));
+  socket.join(driverRoom(driver.country, driver.serviceCategory || 'ride', driver.vehicleType));
   const open = Array.from(requests.values())
-    .filter((r) => r.status === 'open' && r.vehicleType === driver.vehicleType && r.country === driver.country)
+    .filter((r) => r.status === 'open' && r.vehicleType === driver.vehicleType && r.country === driver.country && (r.serviceCategory || 'ride') === (driver.serviceCategory || 'ride'))
     .map(requestPublicView);
   socket.emit('ride:list', open);
 }
@@ -596,15 +607,16 @@ io.on('connection', (socket) => {
   // this is the one place demand, time-of-day, and any cancellation
   // penalty actually get applied; the client only shows what this
   // returns, it doesn't compute pricing itself.
-  socket.on('fare:suggest', async ({ vehicleType, km }, ack) => {
+  socket.on('fare:suggest', async ({ vehicleType, km, serviceCategory }, ack) => {
     if (!ack) return;
-    if (!['motorcycle', 'car'].includes(vehicleType) || typeof km !== 'number') {
+    const category = categories.isValidCategory(serviceCategory) ? serviceCategory : 'ride';
+    if (!categories.isValidSubType(category, vehicleType) || typeof km !== 'number') {
       return ack({ error: 'Invalid request' });
     }
     const country = socket.data.country || config.DEFAULT_COUNTRY;
     const base = baseFareForKm(km, vehicleType, country);
     const tMult = timeOfDayMultiplier();
-    const dMult = demandMultiplier(country, vehicleType);
+    const dMult = demandMultiplier(country, category, vehicleType);
     let penaltyPct = 0;
     if (socket.data.riderPhone) {
       const penalty = await riders.peekPenalty(socket.data.riderPhone);
@@ -614,6 +626,7 @@ io.on('connection', (socket) => {
     ack({
       suggestedFare: suggested,
       currency: config.getCountry(country).currency,
+      negotiationLabel: categories.getCategory(category).negotiationLabel,
       demandMultiplier: dMult,
       timeMultiplier: tMult,
       penaltyApplied: penaltyPct > 0,
@@ -621,16 +634,17 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Rider posts a new trip + proposed fare, for a specific vehicle type
+  // Rider posts a new trip + proposed price, for a specific category + sub-type
   socket.on('ride:create', async (data, ack) => {
     if (socket.data.role !== 'rider') return ack && ack({ error: 'not a rider' });
-    if (!['motorcycle', 'car'].includes(data.vehicleType)) return ack && ack({ error: 'choose a vehicle type' });
+    const category = categories.isValidCategory(data.serviceCategory) ? data.serviceCategory : 'ride';
+    if (!categories.isValidSubType(category, data.vehicleType)) return ack && ack({ error: 'choose a valid option' });
     const country = socket.data.country || config.DEFAULT_COUNTRY;
 
     for (const [id, r] of requests) {
       if (r.riderSocketId === socket.id && r.status === 'open') {
         requests.delete(id);
-        io.to(driverRoom(r.country, r.vehicleType)).emit('ride:removed', { requestId: id });
+        io.to(driverRoom(r.country, r.serviceCategory || 'ride', r.vehicleType)).emit('ride:removed', { requestId: id });
       }
     }
 
@@ -639,13 +653,13 @@ io.on('connection', (socket) => {
     const id = nextId('req');
     const r = {
       id, riderSocketId: socket.id, riderName: socket.data.name, riderPhone: socket.data.riderPhone || null,
-      country,
+      country, serviceCategory: category,
       pickup: data.pickup, drop: data.drop, pickupName: data.pickupName, dropName: data.dropName,
       proposedFare: data.proposedFare, vehicleType: data.vehicleType, km: data.km,
       status: 'open', createdAt: Date.now()
     };
     requests.set(id, r);
-    await broadcastRideToRoomTiered(country, data.vehicleType, requestPublicView(r));
+    await broadcastRideToRoomTiered(country, category, data.vehicleType, requestPublicView(r));
     ack && ack({ requestId: id });
   });
 
@@ -653,7 +667,7 @@ io.on('connection', (socket) => {
     const r = requests.get(requestId);
     if (!r || r.riderSocketId !== socket.id) return;
     requests.delete(requestId);
-    io.to(driverRoom(r.country, r.vehicleType)).emit('ride:removed', { requestId });
+    io.to(driverRoom(r.country, r.serviceCategory || 'ride', r.vehicleType)).emit('ride:removed', { requestId });
     for (const [tid, t] of threads) {
       if (t.requestId === requestId && t.status === 'open') {
         t.status = 'declined';
@@ -664,6 +678,24 @@ io.on('connection', (socket) => {
 
   // Driver opens a negotiation thread on a request (first offer = their price;
   // if it equals the rider's ask, the frontend can treat it as a straight accept)
+// The server, never the client, decides the price for any category that
+// isn't 'negotiate' — a driver's app could send any number it wants, but
+// for fixed pricing that number is never trusted; it's computed here
+// from the driver's own set rate or the country's published rate.
+function resolveFixedPrice(pricingModel, driverRecord, request) {
+  const country = config.getCountry(request.country);
+  if (pricingModel === 'fixed_by_provider') return driverRecord.fixedRate || 0;
+  if (pricingModel === 'fixed_platform_rate') return (country.wasteRates && country.wasteRates.collectionFee) || 0;
+  if (pricingModel === 'fixed_per_kg') {
+    // 'km' doubles as the recyclables' weight in kilograms for this
+    // sub-type — reusing the existing field rather than adding a whole
+    // separate quantity concept for one sub-type.
+    const perKg = (country.wasteRates && country.wasteRates.recyclingPerKg) || 0;
+    return Math.round(perKg * (request.km || 0));
+  }
+  return null; // 'negotiate' — caller should use the client-provided price instead
+}
+
   socket.on('thread:start', async ({ requestId, price }, ack) => {
     if (socket.data.role !== 'driver' || !socket.data.approved) {
       return ack && ack({ error: 'Your driver account is not approved yet.' });
@@ -674,24 +706,35 @@ io.on('connection', (socket) => {
     }
     const r = requests.get(requestId);
     if (!r || r.status !== 'open') return ack && ack({ error: 'request no longer open' });
-    if (r.vehicleType !== socket.data.vehicleType) return ack && ack({ error: 'vehicle type mismatch' });
+    if (r.vehicleType !== socket.data.vehicleType || (r.serviceCategory || 'ride') !== (socket.data.serviceCategory || 'ride')) {
+      return ack && ack({ error: 'category or sub-type mismatch' });
+    }
+
+    const pricingModel = categories.pricingModelFor(r.serviceCategory || 'ride', r.vehicleType);
+    const fixedPrice = resolveFixedPrice(pricingModel, driverRecord, r);
+    const openingPrice = fixedPrice !== null ? fixedPrice : price;
 
     const id = nextId('thr');
     const t = {
       id, requestId, driverSocketId: socket.id, driverName: socket.data.name, driverPhone: socket.data.phone,
       vehiclePlate: socket.data.vehiclePlate, vehicleModel: socket.data.vehicleModel, vehicleColor: socket.data.vehicleColor,
-      offers: [{ by: 'driver', price, ts: Date.now() }], status: 'open'
+      pricingModel, serviceCategory: r.serviceCategory || 'ride', vehicleType: r.vehicleType,
+      offers: [{ by: 'driver', price: openingPrice, ts: Date.now() }], status: 'open'
     };
     threads.set(id, t);
     io.to(r.riderSocketId).emit('thread:new', threadPublicView(t));
     ack && ack({ threadId: id });
   });
 
-  // Either side sends a counter-offer on an existing thread
+  // Either side sends a counter-offer on an existing thread — refused
+  // outright for anything priced outside 'negotiate', since letting
+  // either side "counter" a fixed platform or provider rate would defeat
+  // the entire point of it being fixed.
   socket.on('thread:offer', ({ threadId, price, by }) => {
     if (by === 'driver' && !socket.data.approved) return;
     const t = threads.get(threadId);
     if (!t || t.status !== 'open') return;
+    if (t.pricingModel && t.pricingModel !== 'negotiate') return; // fixed pricing — no counter-offers permitted
     t.offers.push({ by, price, ts: Date.now() });
     const r = requests.get(t.requestId);
     if (by === 'rider' && r && r.riderSocketId === socket.id) {
@@ -735,7 +778,7 @@ io.on('connection', (socket) => {
         }
       }
       requests.delete(r.id);
-      io.to(driverRoom(r.country, r.vehicleType)).emit('ride:removed', { requestId: r.id });
+      io.to(driverRoom(r.country, r.serviceCategory || 'ride', r.vehicleType)).emit('ride:removed', { requestId: r.id });
     }
   });
 
@@ -747,7 +790,11 @@ io.on('connection', (socket) => {
     if (!t || t.status !== 'accepted' || t.driverSocketId !== socket.id) return;
     t.status = 'completed';
 
-    const result = await drivers.deductCommission(t.driverId, t.finalPrice);
+    const baseRate = categories.commissionRateFor(t.serviceCategory || 'ride', t.vehicleType);
+    const resolvedBaseRate = baseRate !== null ? baseRate : drivers.COMMISSION_RATE;
+    const ratingSummary = await ratings.getDriverRatingSummary(t.driverId);
+    const commissionRate = ratings.applyRewardDiscount(resolvedBaseRate, ratingSummary);
+    const result = await drivers.deductCommission(t.driverId, t.finalPrice, commissionRate);
     if (!result.error) {
       socket.emit('wallet:update', await drivers.walletView(result.driver));
     }

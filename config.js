@@ -22,7 +22,12 @@ const COUNTRIES = {
     rates: {
       motorcycle: { base: 1000, perKm: 700 },
       car: { base: 2000, perKm: 1300 }
-    }
+    },
+    // Placeholder — not researched against real Uganda waste-management
+    // pricing the way ride rates were. Confirm real numbers (e.g. against
+    // KCCA-registered private collectors in Kampala) before this category
+    // ever goes live for real money.
+    wasteRates: { collectionFee: 5000, recyclingPerKg: 200 }
   },
   ZM: {
     // Calibrated against Yango's own published Lusaka pricing (~$2/km
@@ -38,10 +43,16 @@ const COUNTRIES = {
     documentLabels: { national_id: 'National Registration Card (NRC)', driving_license: 'Driving Licence' },
     minWalletBalance: 50,
     mapCenter: [-15.3875, 28.3228], // Lusaka
+    // Recalibrated after real testing feedback flagged fares as too high
+    // across Uganda, Zambia, and Malawi. Car rate grounded in a specific
+    // real data point: Lusaka taxi rides run roughly $2.70 (≈67 ZMW) for
+    // 5km. Motorcycle kept proportional to car, since Zambia doesn't have
+    // Uganda's well-documented boda-boda pricing to solve against directly.
     rates: {
-      motorcycle: { base: 18, perKm: 7 }, // motorcycle-taxi culture isn't well documented in Zambia the way it is in Uganda — confirm riders/drivers actually want this option before real launch
-      car: { base: 30, perKm: 12 }
-    }
+      motorcycle: { base: 13, perKm: 5 }, // motorcycle-taxi culture isn't well documented in Zambia the way it is in Uganda — confirm riders/drivers actually want this option before real launch
+      car: { base: 22, perKm: 9 }
+    },
+    wasteRates: { collectionFee: 40, recyclingPerKg: 2 } // placeholder — not researched against real Zambia waste-management pricing
   },
   MW: {
     // Calibrated against a published Blantyre taxi rate of roughly
@@ -55,10 +66,21 @@ const COUNTRIES = {
     documentLabels: { national_id: 'National Identity Card', driving_license: 'Driving Licence' },
     minWalletBalance: 5000,
     mapCenter: [-13.9626, 33.7741], // Lilongwe
+    // Recalibrated after real testing feedback flagged fares as too high.
+    // Honest note: research turned up conflicting real data for Malawi —
+    // one source gives an explicit taxi-calculator formula (5,000 MWK
+    // base + 400 MWK/km, implying ~7,000 MWK for 5km) while another
+    // (Blantyre-specific) suggests a much cheaper ~200 MWK/km with
+    // almost no base fee — nearly a 10x gap between two "real" sources.
+    // Kept this LOWER, since actual tester feedback (real usage
+    // behavior) is stronger evidence than either published rate card,
+    // and both sources agree the calculator figure may be skewed toward
+    // a premium/airport-transfer tier rather than everyday local pricing.
     rates: {
-      motorcycle: { base: 300, perKm: 120 },
-      car: { base: 500, perKm: 200 }
-    }
+      motorcycle: { base: 250, perKm: 60 },
+      car: { base: 400, perKm: 100 }
+    },
+    wasteRates: { collectionFee: 800, recyclingPerKg: 30 } // placeholder — not researched against real Malawi waste-management pricing
   },
   BW: {
     name: 'Botswana',
@@ -71,7 +93,8 @@ const COUNTRIES = {
     rates: {
       motorcycle: { base: 15, perKm: 8 }, // placeholder — motorcycle-taxi culture is far less common in Botswana than Uganda; verify this vehicle type is even wanted here before launch
       car: { base: 25, perKm: 15 }
-    }
+    },
+    wasteRates: { collectionFee: 40, recyclingPerKg: 2 } // placeholder — not researched against real Botswana waste-management pricing
   },
   ZW: {
     // Zimbabwe officially uses the ZiG (Zimbabwe Gold, introduced 2024),
@@ -90,7 +113,8 @@ const COUNTRIES = {
     rates: {
       motorcycle: { base: 0.5, perKm: 0.3 },
       car: { base: 1, perKm: 0.6 }
-    }
+    },
+    wasteRates: { collectionFee: 3, recyclingPerKg: 0.15 } // placeholder — not researched against real Zimbabwe waste-management pricing
   }
 };
 

@@ -59,4 +59,27 @@ function isHighTier(summary) {
   return summary.avg >= HIGH_TIER_MIN_RATING;
 }
 
-module.exports = { addRating, getDriverRatingSummary, getRatingSummaries, isHighTier, PRIORITY_DELAY_MS, HIGH_TIER_MIN_RATING, MIN_RATINGS_FOR_TIERING };
+// A real reward, not just recognition: a provider who's built up a
+// strong track record pays a slightly lower commission on every future
+// job. Deliberately modest — this rewards consistency without making
+// the platform's own revenue unpredictable.
+const REWARD_MIN_RATING = Number(process.env.REWARD_MIN_RATING || 4.8);
+const REWARD_MIN_COMPLETED = Number(process.env.REWARD_MIN_COMPLETED || 20);
+const REWARD_COMMISSION_DISCOUNT = Number(process.env.REWARD_COMMISSION_DISCOUNT || 0.02); // percentage points off, e.g. 0.02 = 2 points
+
+function isRewardEligible(summary) {
+  return !!summary && summary.count >= REWARD_MIN_COMPLETED && summary.avg >= REWARD_MIN_RATING;
+}
+// Applies the discount to a base commission rate, never letting it go
+// below zero even if someone sets an aggressive discount env var.
+function applyRewardDiscount(baseRate, summary) {
+  if (!isRewardEligible(summary)) return baseRate;
+  return Math.max(0, baseRate - REWARD_COMMISSION_DISCOUNT);
+}
+
+module.exports = {
+  addRating, getDriverRatingSummary, getRatingSummaries, isHighTier,
+  isRewardEligible, applyRewardDiscount,
+  PRIORITY_DELAY_MS, HIGH_TIER_MIN_RATING, MIN_RATINGS_FOR_TIERING,
+  REWARD_MIN_RATING, REWARD_MIN_COMPLETED, REWARD_COMMISSION_DISCOUNT
+};

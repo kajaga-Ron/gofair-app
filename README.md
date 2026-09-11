@@ -649,3 +649,225 @@ counter-offer inputs) now updates together, from one source of truth.
 **Verified with an isolated test against the real shipped code** (not a
 reimplementation) — confirmed a Zambia driver's wallet load correctly
 updates all four currency-displaying elements to ZMW simultaneously.
+
+## Multi-category service platform — the foundation is now built
+
+GoFair's engine now supports five service categories, not just rides —
+built after researching how real platforms handle this (TaskRabbit's
+background-check requirements for household services, Glovo/Jumia
+Food's per-delivery payout model rather than a deposit).
+
+| Category | Vehicle required | Deposit required | Trust referee required |
+|---|---|---|---|
+| Ride | Yes | Yes (full) | No |
+| Delivery | Yes | Yes (40% of ride deposit) | No |
+| Household service | No | **No** | **Yes** — an LC1 chairperson or personal referee, since this is the one category where a provider enters someone's home |
+| Waste & recycling | Yes | Yes | No |
+| Gig work | No | No | No (optional) |
+
+**Only `ride` is switched on** — same "configured but not live" pattern
+as the countries. The other four exist fully in the config and are
+provably working (tested directly, see below), but won't appear as
+options in the app until deliberately activated.
+
+### Why household services need a referee instead of a deposit
+This mirrors TaskRabbit's own reasoning, confirmed via their public
+background-check documentation: a cash deposit protects against a
+driver not showing up; it does nothing to protect a customer who's
+letting a stranger into their home. A referee — someone in the
+provider's actual community who'd stake their own reputation vouching
+for them — is a locally-grounded substitute for the formal background-
+check services (Checkr, Persona) that don't operate in this region.
+
+### Why food delivery does NOT use TaskRabbit/Glovo's own model
+Real food-delivery platforms researched (Glovo, Jumia Food) pay couriers
+per-delivery with commission deducted from money they already control —
+they don't use a pre-funded deposit at all. GoFair's deposit model
+exists specifically because many rides settle in cash directly between
+rider and driver, so the deposit is how commission actually gets
+collected. Delivery keeps a deposit for that same reason, just smaller
+(40% of the ride amount) since a courier's per-job risk is lower.
+
+### Tested directly, not just written
+- A household registration *without* a referee is correctly rejected
+  with a message pointing to the LC1 chairperson requirement
+- A household registration *with* a referee succeeds, with no vehicle
+  plate required at all
+- That same driver's wallet correctly shows no deposit requirement
+- **Category isolation confirmed live**: a plumbing request reaches a
+  registered plumber and does NOT leak to a connected ride driver, even
+  with both online at the same time
+
+### What's still needed before any category beyond rides can launch
+- **Real fare/rate formulas per category** — the existing distance-based
+  formula (base + per-km) makes sense for rides and deliveries, but not
+  for household services (typically hourly or a flat callout) or gig
+  work. This needs category-specific pricing logic, not just relabeling.
+- **Food delivery's vendor/menu system** — genuinely separate work, not
+  covered by this category framework at all (see the "food delivery"
+  discussion elsewhere in this README-adjacent history)
+- **RecycleCash's reversed money flow** — the `moneyDirectionFor()`
+  function exists and is tested at the config level, but the actual
+  payment logic (who pays whom, how commission applies when the
+  *provider* is the one being paid) hasn't been built into the payment
+  functions yet
+
+## Fixed-pricing model — negotiate only where the real evidence supports it
+
+Research before implementation, not assumption: checked how real
+platforms in this exact space actually evolved, not just what sounded
+consistent with GoFair's existing identity.
+
+- **Lynk (Kenya)** — the closest real precedent for household services —
+  started with almost exactly GoFair's negotiate-a-quote model and
+  **deliberately abandoned it**: negotiated quotes created quality-
+  control problems and didn't scale. They moved to standardized,
+  provider-set upfront pricing instead.
+- **Wecyclers (Nigeria)** pays a fixed rate per kilogram for recyclables.
+  **TakaTaka Solutions (Kenya)** charges a fixed collection fee. Neither
+  real African success story in this category negotiates, ever.
+
+**What changed as a result:**
+
+| Category | Pricing | Why |
+|---|---|---|
+| Ride | Negotiate (unchanged) | GoFair's real point of difference from Uber/Bolt |
+| Delivery | Negotiate (unchanged) | Same reasoning — delivery fee genuinely varies by distance |
+| Household service | **Fixed, set by the provider** | Following Lynk's hard-won lesson instead of repeating it |
+| Waste collection | **Fixed, set by the platform** | Following TakaTaka's model |
+| Recyclables | **Fixed per kilogram, set by the platform** | Following Wecyclers' model |
+| Gig work | Negotiate (unchanged) | Genuinely mixed globally; kept closest to how a worker proposes a one-off rate |
+
+**Built and tested, not just designed:**
+- The server is now authoritative on price for every fixed category — a
+  driver's app could send any number, and it's correctly ignored in
+  favor of the provider's real registered rate (household) or the
+  country's published rate (waste/recycling)
+- Counter-offers are correctly blocked entirely on fixed-price threads —
+  confirmed directly: an attempted counter-offer produces no response
+- A household provider now sets their own rate at registration, shown
+  to a customer as a real number, not typed in per-job
+- **A real bug was caught and fixed during this work**: adding the new
+  `fixed_rate` column initially misaligned the registration SQL's column
+  and value counts by one — verified programmatically (not just by eye)
+  before this ever touched a real database, and confirmed correct
+  afterward
+
+### Honest scope limit
+The rider-facing side of booking a fixed-price provider is not yet
+built as its own interface — today's negotiation-card UI (propose,
+counter, accept) still technically works for fixed categories (since
+the server just gives one unchangeable "offer" instead of allowing
+counters), but a real "browse providers and their published rates, then
+book" screen — closer to how Lynk or TaskRabbit actually look — hasn't
+been designed yet. Worth building before any category beyond rides
+actually launches to real users.
+
+## Commission rates set per category, plus a real ratings-based reward
+
+### Final commission rates
+| Category | Commission |
+|---|---|
+| Ride, Delivery | 7% (unchanged — controlled by `COMMISSION_RATE` env var, same as always) |
+| Household services | 7% |
+| Gig work | 5% |
+| Waste collection | 7% |
+| Recycling | 1% |
+
+Recycling's 1% (rather than 0%, which I'd originally suggested given
+Wecyclers' real revenue comes from selling materials downstream, not
+from the household transaction) — a deliberate, small compromise:
+enough to matter to the business, small enough not to meaningfully
+erode what the household is paid for their recyclables.
+
+**Tested for real, not just displayed**: confirmed a gig job actually
+had exactly 5% deducted from the driver's wallet (not 7%, which would
+be an easy copy-paste mistake to make elsewhere in the codebase), and
+every category's own commission rate shown in their wallet matches
+what actually gets deducted at payment time.
+
+### A real financial reward for well-rated, experienced providers
+Not just a badge — a provider with **20+ completed jobs and a 4.8+
+average rating** now pays **2 percentage points less commission** on
+every future job (e.g. a ride driver's 7% becomes 5%). Configurable via
+`REWARD_MIN_RATING`, `REWARD_MIN_COMPLETED`, and
+`REWARD_COMMISSION_DISCOUNT` env vars.
+
+**Verified with real money, not just a UI check**: simulated a driver
+with 20 five-star ratings, then had them complete a real UGX 20,000
+trip — confirmed exactly UGX 1,000 (5%) was deducted from their wallet,
+not the UGX 1,400 (7%) a driver without the reward would have paid on
+the same trip. The wallet screen shows both the driver's earned rate
+and their un-discounted base rate side by side, so the reward is
+visible and motivating, not just a silent internal calculation.
+
+### Free trial mode confirmed universal
+`FREE_TRIAL_MODE` was already checked before any category-specific
+logic runs, so it correctly waives the deposit requirement for every
+category, not just rides — confirmed by reading the code path directly
+rather than assuming.
+
+## Fare rates recalibrated after real testing feedback — prices were too high
+
+Real drivers and riders testing Uganda, Zambia, and Malawi all reported
+fares feeling too expensive. This is exactly the kind of feedback that
+matters more than any published rate card, and it was right — the
+original per-km rate scaled too aggressively for longer trips.
+
+### Uganda — solved directly against real data
+Found a specific, granular real-world source for Kampala boda-boda
+pricing: **~1,000 UGX for 1-3km, ~2,000 for 4-6km, ~3,000 for 7-10km**.
+Solved the base+per-km formula directly against those numbers
+(base≈1,000, perKm≈230) rather than adjusting by feel. The result:
+
+| Distance | Old fare | New fare |
+|---|---|---|
+| 2km (motorcycle) | 2,400 | 1,500 |
+| 5km (motorcycle) | 4,500 | 2,250 |
+| 10km (motorcycle) | 8,000 | 3,500 |
+| 5km (car) | 8,500 | 4,750 |
+| 10km (car) | 15,000 | 8,000 |
+
+The reduction gets larger at longer distances (56% cheaper at 10km vs.
+37% at 2km) — that's the actual bug: the old per-km rate compounded too
+steeply the further a trip went, exactly matching what real testers
+noticed.
+
+### Zambia and Malawi — same proportional correction
+Granular per-distance-bracket data wasn't available for these two the
+way it was for Kampala, so the same ~45-50% reduction to the per-km
+rate was applied proportionally, since the same complaint applied
+across all three countries. **Worth watching closely** as real testing
+continues in these two specifically — Uganda's fix is grounded in
+direct evidence, Zambia and Malawi's is a reasoned proportional
+correction, not independently verified data.
+
+### Nothing else changed
+This is a pure numbers change in `config.js` — no matching, payment, or
+category logic was touched, confirmed by the full regression suite
+passing unchanged afterward.
+
+## Fare update: Uganda reverted, Zambia and Malawi checked against real data
+
+**Uganda reverted to the original rate** (base 1,000/perKm 700 for
+motorcycle, base 2,000/perKm 1,300 for car) — the earlier recalibration
+was undone on explicit instruction.
+
+**Zambia adjusted upward slightly**, grounded in a specific real data
+point: Lusaka taxi rides run roughly **$2.70 (≈67 ZMW) for a 5km trip**,
+consistently reported across sources. The prior estimate (52 ZMW for
+5km) undershot this a bit; now set to hit that real figure almost
+exactly (base 22, perKm 9 → 67 ZMW at 5km).
+
+**Malawi kept at the already-reduced rate — a genuine, honest tension
+worth knowing about.** Research turned up two real sources that
+disagree by almost 10x: one taxi-fare calculator states an explicit
+formula of 5,000 MWK base + 400 MWK/km (implying ~7,000 MWK for a 5km
+ride), while another (Blantyre-specific) suggests roughly 200 MWK/km
+with almost no base fee. Rather than split the difference blindly, this
+kept the lower rate — real tester feedback (people finding the price
+too high, in actual use) is stronger evidence than either published
+number, and the higher calculator figure may reflect airport-transfer
+or premium pricing rather than everyday local fares. **Worth watching
+closely as more real Malawi testing happens** — this is the one number
+in the whole rate table resting on judgment rather than solid data.
