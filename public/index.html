@@ -247,10 +247,20 @@
       </div>
 
       <div id="driverRegisterForm">
-        <h2>Become a driver</h2>
-        <p class="sub">Your account is reviewed before you can see or bid on ride requests.</p>
+        <h2>Become a provider</h2>
+        <p class="sub">Your account is reviewed before you can see or bid on requests.</p>
 
-        <p class="sub" style="margin-bottom:6px;">Which country will you drive in?</p>
+        <p class="sub" style="margin-bottom:6px;">What's the main kind of work you'll offer?</p>
+        <div class="field-stack" style="margin-bottom:12px;">
+          <div class="field"><select id="regCategory" style="border:none;outline:none;font-size:14.5px;flex:1;font-family:inherit;background:transparent;width:100%;padding:2px 0;"><option value="">Loading…</option></select></div>
+        </div>
+
+        <div id="regAdditionalWrap" class="hidden" style="margin-bottom:12px;">
+          <p class="sub" style="margin-bottom:6px;">Also offer any of these on the same identity? (e.g. carry deliveries on the same motorcycle)</p>
+          <div id="regAdditionalCategories"></div>
+        </div>
+
+        <p class="sub" style="margin-bottom:6px;">Which country will you work in?</p>
         <div class="field-stack" style="margin-bottom:12px;">
           <div class="field"><select id="regCountry" style="border:none;outline:none;font-size:14.5px;flex:1;font-family:inherit;background:transparent;width:100%;padding:2px 0;"><option value="">Loading countries…</option></select></div>
         </div>
@@ -262,11 +272,8 @@
           <div class="field"><input id="regPassword" placeholder="Choose a password" type="password"></div>
         </div>
 
-        <p class="sub" style="margin-bottom:6px;">What do you drive?</p>
-        <div class="doctype-row">
-          <label class="doctype-box checked"><input type="radio" name="regVehicleType" value="motorcycle" checked> 🏍 Motorcycle</label>
-          <label class="doctype-box"><input type="radio" name="regVehicleType" value="car"> 🚗 Car</label>
-        </div>
+        <p class="sub" style="margin-bottom:6px;" id="regSubTypeLabel">What do you offer?</p>
+        <div class="doctype-row" id="regSubTypeRow"></div>
 
         <p class="sub" style="margin-bottom:6px;">Which ID are you using?</p>
         <div class="doctype-row">
@@ -276,10 +283,38 @@
 
         <div class="field-stack" style="margin-bottom:10px;">
           <div class="field"><input id="regDocNumber" placeholder="ID number"></div>
-          <div class="field"><input id="regVehiclePlate" placeholder="Vehicle plate number"></div>
-          <div class="field"><input id="regVehicleModel" placeholder="Vehicle model (optional)"></div>
-          <div class="field"><input id="regVehicleColor" placeholder="Vehicle color"></div>
         </div>
+
+        <div id="regVehicleFields">
+          <p class="sub" style="margin-bottom:6px;">Vehicle details</p>
+          <div class="field-stack" style="margin-bottom:10px;">
+            <div class="field"><input id="regVehiclePlate" placeholder="Vehicle plate number"></div>
+            <div class="field"><input id="regVehicleModel" placeholder="Vehicle model (optional)"></div>
+            <div class="field"><input id="regVehicleColor" placeholder="Vehicle color"></div>
+          </div>
+        </div>
+
+        <div id="regFixedRateFields" class="hidden">
+          <p class="sub" style="margin-bottom:6px;">Customers see this price upfront and book at it — there's no back-and-forth negotiation for this category.</p>
+          <div class="field-stack" style="margin-bottom:10px;">
+            <div class="field"><input id="regFixedRate" type="number" inputmode="numeric" placeholder="Your rate"></div>
+          </div>
+        </div>
+
+        <div id="regRefereeFields" class="hidden">
+          <p class="sub" style="margin-bottom:6px;">This work means entering someone's home, so we ask for a referee who can vouch for you — your LC1 chairperson works well, or someone else in your community who's known you a while.</p>
+          <div class="field-stack" style="margin-bottom:10px;">
+            <div class="field"><input id="regRefereeName" placeholder="Referee's full name"></div>
+            <div class="field"><input id="regRefereePhone" placeholder="Referee's phone number" type="tel"></div>
+            <div class="field">
+              <select id="regRefereeType" style="border:none;outline:none;font-size:14.5px;flex:1;font-family:inherit;background:transparent;width:100%;padding:2px 0;">
+                <option value="lc1">LC1 Chairperson</option>
+                <option value="personal">Personal referee</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
         <p class="sub" style="margin-bottom:6px;">Upload clear photos — these are checked before approval.</p>
         <div class="upload-row">
           <label class="upload-box" id="docUploadLabel">National ID photo<input type="file" accept="image/*" id="fileDocPhoto"></label>
@@ -1150,6 +1185,11 @@ function renderWallet(wallet){
     banner.classList.remove('hidden');
     banner.style.background = '#D9EFE3';
     banner.style.color = 'var(--teal)';
+  } else if (wallet.depositRequired === false){
+    banner.innerHTML = `No minimum wallet balance required for this category — a commission still applies to completed jobs.`;
+    banner.classList.remove('hidden');
+    banner.style.background = '#D9EFE3';
+    banner.style.color = 'var(--teal)';
   } else {
     banner.innerHTML = `Top up your wallet to start receiving ride requests — a minimum balance of <span id="walletMinAmount">${currentCurrency} ${fmtUGX(wallet.minBalance)}</span> is required.`;
     banner.style.background = '';
@@ -1306,7 +1346,6 @@ function wireRadioGroup(name, onChange){
     });
   });
 }
-wireRadioGroup('regVehicleType');
 wireRadioGroup('docType', (value)=>{
   updateDocUploadLabel(value);
 });
@@ -1336,27 +1375,124 @@ function updateRegCountryDependentLabels(){
   document.getElementById('docTypeLicenseLabel').textContent = country.documentLabels.driving_license;
   const checkedDocType = document.querySelector('input[name="docType"]:checked')?.value || 'national_id';
   updateDocUploadLabel(checkedDocType);
-  document.getElementById('regCountryNote').textContent =
-    `Fares and your wallet will use ${country.currency} — minimum balance to receive requests: ${country.currency} ${fmtUGX(country.minWalletBalance)}.`;
+  updateRegDepositNote();
 }
 document.getElementById('regCountry').addEventListener('change', updateRegCountryDependentLabels);
+
+let regCategoriesList = [];
+async function populateRegCategoryDropdown(){
+  try{
+    regCategoriesList = (await (await fetch('/api/config/categories')).json()).categories || [];
+  }catch(e){ regCategoriesList = []; }
+  const sel = document.getElementById('regCategory');
+  sel.innerHTML = regCategoriesList.map(c=>`<option value="${c.code}">${c.label}</option>`).join('');
+  updateRegCategoryDependentUI();
+}
+function updateRegCategoryDependentUI(){
+  const category = regCategoriesList.find(c=>c.code===document.getElementById('regCategory').value);
+  if (!category) return;
+  document.getElementById('regSubTypeLabel').textContent = `What ${category.label.toLowerCase()} do you offer?`;
+  const row = document.getElementById('regSubTypeRow');
+  row.innerHTML = category.subTypes.map((s,i)=>
+    `<label class="doctype-box${i===0?' checked':''}"><input type="radio" name="regSubType" value="${s.value}"${i===0?' checked':''}> ${s.label}</label>`
+  ).join('');
+  wireRadioGroup('regSubType');
+  document.getElementById('regVehicleFields').classList.toggle('hidden', !category.requiresVehicle);
+  document.getElementById('regRefereeFields').classList.toggle('hidden', !category.requiresTrustReferee);
+  const isFixedByProvider = category.subTypes.some(s=>s.pricingModel === 'fixed_by_provider');
+  document.getElementById('regFixedRateFields').classList.toggle('hidden', !isFixedByProvider);
+  updateRegDepositNote();
+  renderAdditionalCategoryOptions(category.code);
+}
+function renderAdditionalCategoryOptions(primaryCode){
+  const others = regCategoriesList.filter(c=>c.code !== primaryCode);
+  const wrap = document.getElementById('regAdditionalWrap');
+  const container = document.getElementById('regAdditionalCategories');
+  if (!others.length){ wrap.classList.add('hidden'); container.innerHTML=''; return; }
+  wrap.classList.remove('hidden');
+  container.innerHTML = others.map(c => `
+    <label class="doctype-box" style="display:block;margin-bottom:8px;">
+      <input type="checkbox" class="regAddCatCheck" value="${c.code}"> ${c.label}
+      <div class="hidden" id="regAddPanel-${c.code}" style="margin-top:8px;padding:10px;background:var(--paper-dim);border-radius:10px;">
+        <div class="doctype-row" style="margin-bottom:8px;">
+          ${c.subTypes.map((s,i)=>`<label class="doctype-box${i===0?' checked':''}"><input type="radio" name="regAddSub-${c.code}" value="${s.value}"${i===0?' checked':''}> ${s.label}</label>`).join('')}
+        </div>
+        ${c.subTypes.some(s=>s.pricingModel==='fixed_by_provider') ? `<input type="number" class="regAddFixedRate" data-cat="${c.code}" placeholder="Your rate for this" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;">` : ''}
+      </div>
+    </label>
+  `).join('');
+  container.querySelectorAll('.regAddCatCheck').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      document.getElementById(`regAddPanel-${cb.value}`).classList.toggle('hidden', !cb.checked);
+    });
+  });
+  container.querySelectorAll('[name^="regAddSub-"]').forEach(radio=>{
+    radio.addEventListener('change', ()=>{
+      radio.closest('.doctype-row').querySelectorAll('.doctype-box').forEach(b=>b.classList.remove('checked'));
+      radio.closest('.doctype-box').classList.add('checked');
+    });
+  });
+}
+function collectAdditionalOfferings(){
+  const offerings = [];
+  document.querySelectorAll('.regAddCatCheck:checked').forEach(cb=>{
+    const cat = cb.value;
+    const subType = document.querySelector(`input[name="regAddSub-${cat}"]:checked`)?.value;
+    const rateInput = document.querySelector(`.regAddFixedRate[data-cat="${cat}"]`);
+    const fixedRate = rateInput ? Number(rateInput.value.trim()) : undefined;
+    if (subType) offerings.push({ category: cat, subType, fixedRate });
+  });
+  return offerings;
+}
+function updateRegDepositNote(){
+  const category = regCategoriesList.find(c=>c.code===document.getElementById('regCategory').value);
+  const country = regCountriesList.find(c=>c.code===document.getElementById('regCountry').value);
+  const note = document.getElementById('regCountryNote');
+  if (!category || !country){ note.textContent = ''; return; }
+  if (!category.requiresDeposit){
+    note.textContent = `No minimum wallet balance required for ${category.label.toLowerCase()} — a commission still applies to completed jobs.`;
+  } else {
+    const multiplier = category.code === 'delivery' ? 0.4 : 1; // mirrors categories.js — delivery's deposit is a fraction of the ride deposit
+    const min = Math.round(country.minWalletBalance * multiplier);
+    note.textContent = `Fares will use ${country.currency} — minimum wallet balance to receive requests: ${country.currency} ${fmtUGX(min)}.`;
+  }
+}
+document.getElementById('regCategory').addEventListener('change', updateRegCategoryDependentUI);
 populateRegCountryDropdown();
+populateRegCategoryDropdown();
 
 document.getElementById('btnSubmitRegistration').onclick = async ()=>{
   const fullName = document.getElementById('regFullName').value.trim();
   const phone = document.getElementById('regPhone').value.trim();
   const password = document.getElementById('regPassword').value;
-  const vehicleType = document.querySelector('input[name="regVehicleType"]:checked').value;
+  const serviceCategory = document.getElementById('regCategory').value;
+  const categoryDef = regCategoriesList.find(c=>c.code===serviceCategory);
+  const vehicleType = document.querySelector('input[name="regSubType"]:checked')?.value;
   const documentType = document.querySelector('input[name="docType"]:checked').value;
   const documentNumber = document.getElementById('regDocNumber').value.trim();
   const vehiclePlate = document.getElementById('regVehiclePlate').value.trim();
   const vehicleModel = document.getElementById('regVehicleModel').value.trim();
   const vehicleColor = document.getElementById('regVehicleColor').value.trim();
+  const trustRefereeName = document.getElementById('regRefereeName').value.trim();
+  const trustRefereePhone = document.getElementById('regRefereePhone').value.trim();
+  const trustRefereeType = document.getElementById('regRefereeType').value;
+  const fixedRateInput = document.getElementById('regFixedRate').value.trim();
+  const fixedRate = fixedRateInput ? Number(fixedRateInput) : undefined;
   const docFile = document.getElementById('fileDocPhoto').files[0];
   const selfieFile = document.getElementById('fileSelfie').files[0];
 
-  if (!fullName || !phone || !password || !documentNumber || !vehiclePlate || !docFile || !selfieFile){
+  if (!fullName || !phone || !password || !documentNumber || !vehicleType || !docFile || !selfieFile){
     toast('Please fill in all required fields and photos'); return;
+  }
+  if (categoryDef?.requiresVehicle && !vehiclePlate){
+    toast('Enter your vehicle plate number'); return;
+  }
+  if (categoryDef?.requiresTrustReferee && (!trustRefereeName || !trustRefereePhone)){
+    toast('A referee\'s name and phone number are required for this category'); return;
+  }
+  const isFixedByProvider = categoryDef?.subTypes.some(s=>s.pricingModel === 'fixed_by_provider');
+  if (isFixedByProvider && (!fixedRate || fixedRate <= 0)){
+    toast('Set the rate you charge — customers will see this price before booking you'); return;
   }
   const btn = document.getElementById('btnSubmitRegistration');
   btn.disabled = true; btn.textContent = 'Submitting…';
@@ -1365,7 +1501,11 @@ document.getElementById('btnSubmitRegistration').onclick = async ()=>{
     const selfie = await fileToBase64(selfieFile);
     const res = await fetch('/api/driver/register', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ fullName, phone, password, country: document.getElementById('regCountry').value || myCountry, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor, documentPhoto, selfie })
+      body: JSON.stringify({
+        fullName, phone, password, country: document.getElementById('regCountry').value || myCountry,
+        serviceCategory, documentType, documentNumber, vehicleType, vehiclePlate, vehicleModel, vehicleColor,
+        trustRefereeName, trustRefereePhone, trustRefereeType, fixedRate, additionalOfferings: collectAdditionalOfferings(), documentPhoto, selfie
+      })
     });
     const data = await res.json();
     if (!res.ok){ toast(data.error || 'Could not submit application'); return; }
